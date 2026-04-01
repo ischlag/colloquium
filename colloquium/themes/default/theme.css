@@ -968,12 +968,14 @@ html, body {
 }
 
 /* ===== Fragments (incremental reveal) ===== */
-.fragment {
+.fragment[data-fragment-index] {
     opacity: 0;
+    pointer-events: none;
     transition: opacity 0.35s ease;
 }
-.fragment.visible {
+.fragment[data-fragment-index].visible {
     opacity: 1;
+    pointer-events: auto;
 }
 
 /* ===== Footer (inside each slide) ===== */
@@ -1688,8 +1690,9 @@ body:hover .colloquium-present {
     }
 
     /* Show all fragments in print */
-    .fragment {
+    .fragment[data-fragment-index] {
         opacity: 1 !important;
+        pointer-events: auto !important;
         transition: none !important;
     }
 }
@@ -1703,7 +1706,8 @@ body:hover .colloquium-present {
 }
 
 /* Show all fragments in capture mode */
-.colloquium-capture .fragment {
+.colloquium-capture .fragment[data-fragment-index] {
     opacity: 1 !important;
+    pointer-events: auto !important;
     transition: none !important;
 }
