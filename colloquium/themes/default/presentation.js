@@ -315,6 +315,8 @@ class ColloquiumPresentation {
     }
 
     _bindIframeKeyboardRelay(iframe) {
+        if (iframe.dataset.colloquiumPreserveKeyboard === 'false') return false;
+
         try {
             const iframeDocument = iframe.contentWindow && iframe.contentWindow.document;
             if (!iframeDocument) return false;
