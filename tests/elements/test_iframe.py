@@ -87,10 +87,10 @@ def test_iframe_supports_embed_attributes():
     out = _render_iframe_block(
         "\n".join(
             [
-                "src: https://www.interconnects.ai/embed",
+                "src: https://www.interconnects.ai/embed?transparent=1",
                 "width: 480",
                 "height: 320",
-                'style: "border: 1px solid #EEE; background: white"',
+                'style: "border: 0; background: transparent"',
                 "frameborder: 0",
                 "scrolling: no",
             ]
@@ -100,4 +100,4 @@ def test_iframe_supports_embed_attributes():
     assert 'height="320"' in out
     assert 'frameborder="0"' in out
     assert 'scrolling="no"' in out
-    assert 'style="border: 1px solid #EEE; background: white"' in out
+    assert 'style="border: 0; background: transparent"' in out

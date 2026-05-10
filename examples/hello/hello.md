@@ -384,11 +384,11 @@ The reward model is trained with the Bradley-Terry preference model, where $y_w$
 ## Embedded Web Content
 
 ```iframe
-src: https://www.interconnects.ai/embed
+src: https://www.interconnects.ai/embed?transparent=1
 width: 480
-height: 420
+height: 320
 title: Interconnects
-style: "border: 1px solid #EEE; background: white"
+style: "border: 0; background: transparent"
 frameborder: 0
 scrolling: no
 allowfullscreen: false
