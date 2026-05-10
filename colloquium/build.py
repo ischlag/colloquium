@@ -295,38 +295,31 @@ def _number_fragments(html: str) -> tuple[str, int]:
     return result, count
 
 
-def _process_fragments(
-    html: str, animate_type: str | None,
-) -> tuple[str, int]:
-    """Process step markers and auto-animate to produce fragment markup.
+def _prepare_fragments(html: str, animate_type: str | None) -> str:
+    """Process step markers and auto-animate without assigning indices.
 
     *animate_type* should be ``"bullets"``/``"items"`` or ``None``.
     ``"blocks"`` mode is applied earlier in the pipeline (before
     column/row splitting) so it should not be passed here.
 
-    Pre-existing ``class="fragment"`` elements (e.g. from an earlier
-    blocks-wrapping pass) are numbered even when *animate_type* is None.
-
-    Returns *(processed_html, fragment_count)*.
+    Pre-existing generated fragment markers (e.g. from an earlier
+    blocks-wrapping pass) are preserved for a later whole-slide numbering
+    pass.
     """
     has_existing = _contains_generated_fragments(html)
     if not animate_type and "<!-- step" not in html and not has_existing:
-        return html, 0
+        return html
 
     # Split at step markers
     groups = _process_step_markers(html)
     if not groups:
-        return html, 0
+        return html
 
     # No step markers — single group, just apply auto-animate
     if len(groups) == 1 and not groups[0][1]:
         if animate_type:
-            result = _apply_auto_animate(groups[0][0], animate_type)
-            return _number_fragments(result)
-        # Number any pre-existing fragments (e.g. from blocks wrapping)
-        if has_existing:
-            return _number_fragments(html)
-        return html, 0
+            return _apply_auto_animate(groups[0][0], animate_type)
+        return html
 
     # Multiple groups (step markers present)
     parts = []
@@ -348,6 +341,17 @@ def _process_fragments(
             parts.append(chunk)
 
     result = "\n".join(parts)
+    return result
+
+
+def _process_fragments(
+    html: str, animate_type: str | None,
+) -> tuple[str, int]:
+    """Process fragments and assign sequential ``data-fragment-index`` values.
+
+    Returns *(processed_html, fragment_count)*.
+    """
+    result = _prepare_fragments(html, animate_type)
     return _number_fragments(result)
 
 
@@ -987,6 +991,15 @@ def _split_columns_from_rendered(rendered: str) -> str:
     return "".join(f'<div class="col">{p.strip()}</div>' for p in col_parts)
 
 
+def _build_columns_html(rendered: str, animate_type: str | None) -> str:
+    """Build column wrappers after processing fragments inside each column."""
+    col_parts = re.split(r"<p>\|\|\|</p>", rendered)
+    return "".join(
+        f'<div class="col">{_prepare_fragments(part.strip(), animate_type)}</div>'
+        for part in col_parts
+    )
+
+
 def _extract_grid_spec(classes: list[str], prefix: str) -> str | None:
     """Return the first grid spec found for a class prefix such as cols- or rows-."""
     for cls in classes:
@@ -1039,6 +1052,7 @@ def _build_rows_html(
     animate_type: str | None = None,
 ) -> str:
     """Build a row-based slide body with optional nested columns in each row."""
+    frag_animate = animate_type if animate_type in ("bullets", "items") else None
     row_blocks = [block.strip() for block in _ROW_SPLIT_RE.split(content) if block.strip()]
     rows_html = []
     for block in row_blocks:
@@ -1061,7 +1075,9 @@ def _build_rows_html(
                 rendered, preserve_column_markers=has_row_cols,
             )
         if has_row_cols:
-            rendered = _split_columns_from_rendered(rendered)
+            rendered = _build_columns_html(rendered, frag_animate)
+        else:
+            rendered = _prepare_fragments(rendered, frag_animate)
 
         style_attr = f' style="{row_style}"' if row_style else ""
         rows_html.append(f'<div class="{" ".join(row_classes)}"{style_attr}>{rendered}</div>')
@@ -1116,7 +1132,7 @@ def _build_slide_html(
     animate_type = slide.metadata.get("animate")
     # blocks wrapping runs before column/row splitting (it targets raw
     # block-level elements which get obscured by wrapper divs); bullets
-    # and step markers run after splitting and are passed to _process_fragments.
+    # and step markers run after splitting, inside each layout container.
     frag_animate = animate_type if animate_type in ("bullets", "items") else None
     if slide_content:
         figure_captions = _slide_uses_figure_captions(slide.classes, deck_figure_captions)
@@ -1125,7 +1141,7 @@ def _build_slide_html(
                 slide_content, md, figure_captions=figure_captions,
                 animate_type=animate_type,
             )
-            rendered, fragment_count = _process_fragments(rendered, frag_animate)
+            rendered, fragment_count = _number_fragments(rendered)
             rows_spec = _extract_grid_spec(slide.classes, "rows-")
             rows_style = _grid_template_style(rows_spec or "", "rows")
             content_style_attr = f' style="{rows_style}"' if rows_style else ""
@@ -1145,8 +1161,10 @@ def _build_slide_html(
                 cols_spec = _extract_grid_spec(slide.classes, "cols-")
                 content_classes.append("colloquium-grid")
                 content_style = _grid_template_style(cols_spec or "", "columns")
-                rendered = _split_columns_from_rendered(rendered)
-            rendered, fragment_count = _process_fragments(rendered, frag_animate)
+                rendered = _build_columns_html(rendered, frag_animate)
+                rendered, fragment_count = _number_fragments(rendered)
+            else:
+                rendered, fragment_count = _process_fragments(rendered, frag_animate)
             content_style_attr = f' style="{content_style}"' if content_style else ""
             parts.append(f'<div class="{" ".join(content_classes)}"{content_style_attr}>{rendered}</div>')
 

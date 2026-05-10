@@ -1648,6 +1648,40 @@ class TestFragments:
         assert 'data-fragment-count="4"' in html
         assert '<div class="colloquium-row"><div class="fragment"' in html
 
+    def test_step_with_columns_preserves_column_boundaries(self):
+        """Step fragments in a column must not wrap sibling column divs."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Cols",
+            content="Left\n\n<!-- step -->\n\nLeft step\n\n|||\n\nRight",
+            classes=["cols-2"],
+        )
+        deck.slides.append(slide)
+        html = build_deck(deck)
+        assert 'data-fragment-count="1"' in html
+        assert (
+            '<div class="col"><p>Left</p>\n'
+            '<div class="fragment" data-fragment-index="1"><p>Left step</p></div>'
+            '</div><div class="col"><p>Right</p></div>'
+        ) in html
+
+    def test_step_with_rows_preserves_row_boundaries(self):
+        """Step fragments in a row must not wrap sibling row divs."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Rows",
+            content="Top\n\n<!-- step -->\n\nTop step\n\n===\n\nBottom",
+            classes=["rows-2"],
+        )
+        deck.slides.append(slide)
+        html = build_deck(deck)
+        assert 'data-fragment-count="1"' in html
+        assert (
+            '<div class="colloquium-row"><p>Top</p>\n'
+            '<div class="fragment" data-fragment-index="1"><p>Top step</p></div>'
+            '</div><div class="colloquium-row"><p>Bottom</p>\n</div>'
+        ) in html
+
     def test_step_blockquote_with_nested_bullets(self):
         """Step group with a blockquote containing fragments must wrap the blockquote."""
         deck = Deck(title="Test")
