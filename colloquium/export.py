@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import http.server
 import os
 import shutil
+import socketserver
 import subprocess
 import tempfile
+import threading
+from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
+from urllib.parse import quote
 
 
 def _find_browser() -> str | None:
@@ -39,9 +45,39 @@ def _is_chromium_based(browser_path: str) -> bool:
     return any(x in name for x in ["chrome", "chromium", "edge", "brave"])
 
 
+@contextmanager
+def _serve_html_for_export(html_path: str):
+    """Serve an HTML deck over loopback while Chromium prints it.
+
+    Loading decks from ``file://`` can leave cross-origin iframes blank in
+    Chromium's print-to-PDF path even when the same page renders normally.
+    Serving the deck over HTTP preserves relative assets and lets embedded
+    frames load in the same browser mode users preview locally.
+    """
+    html_file = Path(html_path).resolve()
+
+    class QuietHandler(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, format, *args):
+            pass
+
+    class ExportTCPServer(socketserver.TCPServer):
+        allow_reuse_address = True
+
+    handler = partial(QuietHandler, directory=str(html_file.parent))
+
+    with ExportTCPServer(("127.0.0.1", 0), handler) as httpd:
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            host, port = httpd.server_address
+            yield f"http://{host}:{port}/{quote(html_file.name)}"
+        finally:
+            httpd.shutdown()
+            thread.join(timeout=2)
+
+
 def _export_pdf_from_html(html_path: str, output_path: str) -> str | None:
     """Export an existing HTML deck to PDF using a system browser."""
-    html_url = f"file://{Path(html_path).resolve()}"
     browser = _find_browser()
     if browser is None:
         return None
@@ -51,24 +87,25 @@ def _export_pdf_from_html(html_path: str, output_path: str) -> str | None:
 
     # Use Chromium's headless print-to-pdf
     # 10in x 5.625in = 16:9 landscape, matching @page size in print CSS
-    cmd = [
-        browser,
-        "--headless",
-        "--disable-gpu",
-        f"--print-to-pdf={output_path}",
-        "--no-pdf-header-footer",
-        "--print-to-pdf-no-header",
-        "--no-margins",
-        f"--paper-width=10",
-        f"--paper-height=5.625",
-        "--virtual-time-budget=5000",
-        html_url,
-    ]
+    with _serve_html_for_export(html_path) as html_url:
+        cmd = [
+            browser,
+            "--headless",
+            "--disable-gpu",
+            f"--print-to-pdf={output_path}",
+            "--no-pdf-header-footer",
+            "--print-to-pdf-no-header",
+            "--no-margins",
+            f"--paper-width=10",
+            f"--paper-height=5.625",
+            "--virtual-time-budget=5000",
+            html_url,
+        ]
 
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=30, check=True)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-        return None
+        try:
+            subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            return None
 
     if Path(output_path).exists():
         # Optional ghostscript compression
