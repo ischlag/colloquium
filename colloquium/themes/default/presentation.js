@@ -9,6 +9,7 @@ class ColloquiumPresentation {
         this.slides = Array.from(document.querySelectorAll('.slide'));
         this.currentIndex = 0;
         this.totalSlides = this.slides.length;
+        this._iframeKeyboardRelayDocuments = new WeakSet();
 
         // Reference dimensions (16:9)
         this.width = 1280;
@@ -314,24 +315,26 @@ class ColloquiumPresentation {
     }
 
     _bindIframeKeyboardRelay(iframe) {
-        if (iframe.dataset.colloquiumKeyboardRelayBound === 'true') return;
-
         try {
             const iframeDocument = iframe.contentWindow && iframe.contentWindow.document;
-            if (!iframeDocument) return;
+            if (!iframeDocument) return false;
+            if (this._iframeKeyboardRelayDocuments.has(iframeDocument)) return true;
+
             iframeDocument.addEventListener('keydown', (e) => {
                 if (this._isTextInputTarget(e.target)) return;
                 this._handleNavigationKey(e);
             });
-            iframe.dataset.colloquiumKeyboardRelayBound = 'true';
+            this._iframeKeyboardRelayDocuments.add(iframeDocument);
+            return true;
         } catch (_) {
             // Cross-origin frames cannot expose their keyboard events to the parent deck.
+            return false;
         }
     }
 
     _recoverFocusFromIframe(iframe) {
         if (iframe.dataset.colloquiumPreserveKeyboard === 'false') return;
-        if (iframe.dataset.colloquiumKeyboardRelayBound === 'true') return;
+        if (this._bindIframeKeyboardRelay(iframe)) return;
 
         setTimeout(() => {
             if (document.activeElement === iframe) {
