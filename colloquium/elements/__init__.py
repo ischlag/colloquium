@@ -21,11 +21,18 @@ from colloquium.elements.conversation import (
     reset as reset_conversations,
 )
 
+from colloquium.elements.iframe import (
+    PATTERN as IFRAME_PATTERN,
+    process as process_iframe,
+    reset as reset_iframes,
+)
+
 ELEMENTS = [
     (BUILTWITH_PATTERN, process_builtwith),
     (BOX_PATTERN, process_box),
     (CHART_PATTERN, process_chart),
     (CONV_PATTERN, process_conversation),
+    (IFRAME_PATTERN, process_iframe),
 ]
 
 
@@ -42,3 +49,4 @@ def reset() -> None:
     reset_boxes()
     reset_charts()
     reset_conversations()
+    reset_iframes()

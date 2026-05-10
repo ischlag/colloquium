@@ -9,6 +9,7 @@ class ColloquiumPresentation {
         this.slides = Array.from(document.querySelectorAll('.slide'));
         this.currentIndex = 0;
         this.totalSlides = this.slides.length;
+        this._iframeKeyboardRelayDocuments = new WeakSet();
 
         // Reference dimensions (16:9)
         this.width = 1280;
@@ -21,6 +22,7 @@ class ColloquiumPresentation {
 
         if (this.totalSlides === 0) return;
 
+        this.deck.setAttribute('tabindex', '-1');
         this.progressBar = document.querySelector('.colloquium-progress-bar');
         this.pickerTrigger = document.querySelector('.colloquium-picker-trigger');
         this.pickerTriggerCount = this.pickerTrigger
@@ -36,6 +38,7 @@ class ColloquiumPresentation {
         this._bindPickerTrigger();
         this._bindPresent();
         this._bindKeyboard();
+        this._bindIframes();
         this._bindClick();
         this._bindTouch();
         this._bindHashChange();
@@ -254,45 +257,94 @@ class ColloquiumPresentation {
 
     _bindKeyboard() {
         document.addEventListener('keydown', (e) => {
-            // Ignore if user is typing in an input
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-            switch (e.key) {
-                case 'ArrowRight':
-                case 'ArrowDown':
-                case ' ':
-                case 'PageDown':
-                    e.preventDefault();
-                    this.next();
-                    break;
-                case 'ArrowLeft':
-                case 'ArrowUp':
-                case 'PageUp':
-                    e.preventDefault();
-                    this.prev();
-                    break;
-                case 'Home':
-                    e.preventDefault();
-                    this.first();
-                    break;
-                case 'End':
-                    e.preventDefault();
-                    this.last();
-                    break;
-                case 'f':
-                case 'F':
-                    e.preventDefault();
-                    this._toggleFullscreen();
-                    break;
-                case 'Escape':
-                    if (this.pickerOpen) {
-                        this._closePicker();
-                    } else if (document.fullscreenElement) {
-                        document.exitFullscreen();
-                    }
-                    break;
-            }
+            if (this._isTextInputTarget(e.target)) return;
+            this._handleNavigationKey(e);
         });
+    }
+
+    _isTextInputTarget(target) {
+        if (!target || !target.tagName) return false;
+        if (target.isContentEditable) return true;
+        return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
+    }
+
+    _handleNavigationKey(e) {
+        switch (e.key) {
+            case 'ArrowRight':
+            case 'ArrowDown':
+            case ' ':
+            case 'PageDown':
+                e.preventDefault();
+                this.next();
+                break;
+            case 'ArrowLeft':
+            case 'ArrowUp':
+            case 'PageUp':
+                e.preventDefault();
+                this.prev();
+                break;
+            case 'Home':
+                e.preventDefault();
+                this.first();
+                break;
+            case 'End':
+                e.preventDefault();
+                this.last();
+                break;
+            case 'f':
+            case 'F':
+                e.preventDefault();
+                this._toggleFullscreen();
+                break;
+            case 'Escape':
+                if (this.pickerOpen) {
+                    this._closePicker();
+                } else if (document.fullscreenElement) {
+                    document.exitFullscreen();
+                }
+                break;
+        }
+    }
+
+    _bindIframes() {
+        document.querySelectorAll('iframe.colloquium-iframe').forEach((iframe) => {
+            this._bindIframeKeyboardRelay(iframe);
+            iframe.addEventListener('load', () => this._bindIframeKeyboardRelay(iframe));
+            iframe.addEventListener('focus', () => this._recoverFocusFromIframe(iframe));
+        });
+    }
+
+    _bindIframeKeyboardRelay(iframe) {
+        if (iframe.dataset.colloquiumPreserveKeyboard === 'false') return false;
+
+        try {
+            const iframeDocument = iframe.contentWindow && iframe.contentWindow.document;
+            if (!iframeDocument) return false;
+            if (this._iframeKeyboardRelayDocuments.has(iframeDocument)) return true;
+
+            iframeDocument.addEventListener('keydown', (e) => {
+                if (this._isTextInputTarget(e.target)) return;
+                this._handleNavigationKey(e);
+            });
+            this._iframeKeyboardRelayDocuments.add(iframeDocument);
+            return true;
+        } catch (_) {
+            // Cross-origin frames cannot expose their keyboard events to the parent deck.
+            return false;
+        }
+    }
+
+    _recoverFocusFromIframe(iframe) {
+        if (iframe.dataset.colloquiumPreserveKeyboard === 'false') return;
+        if (this._bindIframeKeyboardRelay(iframe)) return;
+
+        setTimeout(() => {
+            if (document.activeElement === iframe) {
+                iframe.blur();
+                window.focus();
+                this.deck.focus({ preventScroll: true });
+            }
+        }, 0);
     }
 
     _bindClick() {

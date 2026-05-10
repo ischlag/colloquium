@@ -379,6 +379,23 @@ The reward model is trained with the Bradley-Terry preference model, where $y_w$
 
 ---
 
+<!-- align: center -->
+
+## Embedded Web Content
+
+```iframe
+src: https://www.interconnects.ai/embed?transparent=1
+width: 480
+height: 320
+title: Interconnects
+style: "border: 0; background: transparent"
+frameborder: 0
+scrolling: no
+allowfullscreen: false
+```
+
+---
+
 <!-- rows: 80/20 -->
 ## Thank You
 
