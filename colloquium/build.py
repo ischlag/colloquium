@@ -96,7 +96,21 @@ _CLASS_ATTR_RE = re.compile(r'\sclass=(["\'])(.*?)\1')
 _LI_TAG_RE = re.compile(r"<li\b([^>]*)>")
 _GENERATED_FRAGMENT_RE = re.compile(r'\sdata-colloquium-fragment="1"')
 _FRAGMENT_BLOCK_TAGS = frozenset(
-    ("p", "ul", "ol", "pre", "blockquote", "table", "figure")
+    (
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "p",
+        "ul",
+        "ol",
+        "pre",
+        "blockquote",
+        "table",
+        "figure",
+    )
 )
 
 

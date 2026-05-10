@@ -1648,6 +1648,26 @@ class TestFragments:
         assert 'data-fragment-count="4"' in html
         assert '<div class="colloquium-row"><div class="fragment"' in html
 
+    def test_blocks_wraps_markdown_headings(self):
+        """Blocks mode must treat markdown headings as top-level fragments."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Headings",
+            content="### Section\n\nDetails.",
+            metadata={"animate": "blocks"},
+        )
+        deck.slides.append(slide)
+        html = build_deck(deck)
+        assert 'data-fragment-count="2"' in html
+        assert (
+            '<div class="fragment" data-fragment-index="1">'
+            '<h3>Section</h3></div>'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="2">'
+            '<p>Details.</p></div>'
+        ) in html
+
     def test_step_with_columns_preserves_column_boundaries(self):
         """Step fragments in a column must not wrap sibling column divs."""
         deck = Deck(title="Test")
