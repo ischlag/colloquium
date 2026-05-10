@@ -1,5 +1,3 @@
-import re
-
 from colloquium.elements.iframe import PATTERN, process
 
 
@@ -22,6 +20,7 @@ def test_iframe_renders_optional_fields():
         "\n".join(
             [
                 "src: https://example.com/x",
+                "width: 480",
                 "height: 520",
                 "title: Demo Frame",
                 "loading: eager",
@@ -29,6 +28,7 @@ def test_iframe_renders_optional_fields():
             ]
         )
     )
+    assert 'width="480"' in out
     assert 'height="520"' in out
     assert 'title="Demo Frame"' in out
     assert 'loading="eager"' in out
@@ -50,6 +50,12 @@ def test_iframe_requires_src():
     assert "Iframe requires src" in out
 
 
+def test_iframe_rejects_null_src():
+    out = _render_iframe_block("src: null")
+    assert "Iframe requires src" in out
+    assert 'src="None"' not in out
+
+
 def test_iframe_sanitizes_src_and_title():
     out = _render_iframe_block(
         "\n".join(
@@ -67,3 +73,28 @@ def test_iframe_height_falls_back_to_default_for_invalid_values():
     for bad in ["0", "-10", "abc"]:
         out = _render_iframe_block(f"src: https://example.com\nheight: {bad}")
         assert 'height="480"' in out
+
+
+def test_iframe_loading_falls_back_to_default_for_invalid_values():
+    out = _render_iframe_block("src: https://example.com\nloading: banana")
+    assert 'loading="lazy"' in out
+
+
+def test_iframe_supports_embed_attributes():
+    out = _render_iframe_block(
+        "\n".join(
+            [
+                "src: https://www.interconnects.ai/embed",
+                "width: 480",
+                "height: 320",
+                'style: "border: 1px solid #EEE; background: white"',
+                "frameborder: 0",
+                "scrolling: no",
+            ]
+        )
+    )
+    assert 'width="480"' in out
+    assert 'height="320"' in out
+    assert 'frameborder="0"' in out
+    assert 'scrolling="no"' in out
+    assert 'style="border: 1px solid #EEE; background: white"' in out

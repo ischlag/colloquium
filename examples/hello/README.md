@@ -13,3 +13,4 @@ Use it when you want one example that touches most of the default authoring surf
 - conversation blocks
 - box callouts
 - footnotes
+- iframe embeds
