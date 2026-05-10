@@ -16,6 +16,7 @@ One line per PR for easy copy into GitHub releases.
 - Upgrade locked pytest to 9.0.3 and Pygments to 2.20.0 to fix CVE-2025-71176 and CVE-2026-4539 ([#30](https://github.com/natolambert/colloquium/pull/30))
 - Upgrade locked lxml to 6.1.0 to fix CVE-2026-41066 (XXE in iterparse/ETCompatXMLParser) ([#31](https://github.com/natolambert/colloquium/pull/31))
 - Add a built-in iframe element for embedding external or local HTML content ([#32](https://github.com/natolambert/colloquium/pull/32))
+- Add fragment-based animations: `<!-- animate: bullets|blocks -->` and `<!-- step -->` for incremental reveal ([#25](https://github.com/natolambert/colloquium/pull/25))
 
 ## [0.2.1] - 2026-03-25
 
