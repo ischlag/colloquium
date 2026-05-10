@@ -11,8 +11,9 @@ def test_iframe_renders_with_required_src():
     assert '<iframe' in out
     assert 'src="https://example.com/embed.html"' in out
     assert 'height="480"' in out  # default
-    assert 'loading="lazy"' in out  # default
+    assert 'loading="eager"' in out  # default
     assert 'allowfullscreen' in out
+    assert 'data-colloquium-preserve-keyboard="true"' in out
 
 
 def test_iframe_renders_optional_fields():
@@ -23,16 +24,18 @@ def test_iframe_renders_optional_fields():
                 "width: 480",
                 "height: 520",
                 "title: Demo Frame",
-                "loading: eager",
+                "loading: lazy",
                 "allowfullscreen: false",
+                "preserve_keyboard: false",
             ]
         )
     )
     assert 'width="480"' in out
     assert 'height="520"' in out
     assert 'title="Demo Frame"' in out
-    assert 'loading="eager"' in out
+    assert 'loading="lazy"' in out
     assert 'allowfullscreen' not in out
+    assert 'data-colloquium-preserve-keyboard="false"' in out
 
 
 def test_iframe_invalid_yaml():
@@ -77,7 +80,7 @@ def test_iframe_height_falls_back_to_default_for_invalid_values():
 
 def test_iframe_loading_falls_back_to_default_for_invalid_values():
     out = _render_iframe_block("src: https://example.com\nloading: banana")
-    assert 'loading="lazy"' in out
+    assert 'loading="eager"' in out
 
 
 def test_iframe_supports_embed_attributes():

@@ -5,7 +5,7 @@ import yaml
 
 PATTERN = re.compile(r'<pre><code class="language-iframe">(.*?)</code></pre>', re.DOTALL)
 IFRAME_DEFAULT_HEIGHT = 480
-IFRAME_DEFAULT_LOADING = "lazy"
+IFRAME_DEFAULT_LOADING = "eager"
 IFRAME_DEFAULT_WIDTH = "100%"
 _FALSE_VALUES = {"false", "off", "0", "no"}
 
@@ -91,6 +91,7 @@ def process(yaml_str: str) -> str:
         quote=True,
     )
     allow = _allowfullscreen(spec.get("allowfullscreen", True))
+    preserve_keyboard = _allowfullscreen(spec.get("preserve_keyboard", True))
     scrolling = _scrolling(spec.get("scrolling"))
     frameborder = html_module.escape(
         _frameborder(spec.get("frameborder", "0")),
@@ -105,6 +106,7 @@ def process(yaml_str: str) -> str:
 
     src_attr = html_module.escape(src, quote=True)
     allow_attr = " allowfullscreen" if allow else ""
+    keyboard_attr = str(preserve_keyboard).lower()
     scrolling_attr = (
         f' scrolling="{html_module.escape(scrolling, quote=True)}"' if scrolling else ""
     )
@@ -112,6 +114,7 @@ def process(yaml_str: str) -> str:
     return (
         f'<div class="colloquium-iframe-container" style="{container_style}">'
         f'<iframe class="colloquium-iframe" src="{src_attr}" title="{title}" loading="{loading}" '
+        f'data-colloquium-preserve-keyboard="{keyboard_attr}" '
         f'width="{html_module.escape(width, quote=True)}" height="{height}" '
         f'frameborder="{frameborder}"{scrolling_attr}{allow_attr} '
         f'style="{html_module.escape(style, quote=True)}"></iframe></div>'

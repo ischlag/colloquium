@@ -191,6 +191,28 @@ html, body {
     display: block;
 }
 
+.colloquium-iframe-container {
+    max-width: 100%;
+}
+
+.colloquium-iframe {
+    display: block;
+    max-width: 100%;
+}
+
+.align-center.active .slide-content > .colloquium-iframe-container {
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.align-left.active .slide-content > .colloquium-iframe-container {
+    margin-right: auto;
+}
+
+.align-right.active .slide-content > .colloquium-iframe-container {
+    margin-left: auto;
+}
+
 .slide figure.colloquium-figure {
     margin: 0 auto 0.8em;
     max-width: 100%;
