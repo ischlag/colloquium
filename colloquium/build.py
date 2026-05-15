@@ -110,6 +110,7 @@ _FRAGMENT_BLOCK_TAGS = frozenset(
         "blockquote",
         "table",
         "figure",
+        "div",
     )
 )
 

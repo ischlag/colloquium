@@ -1668,6 +1668,57 @@ class TestFragments:
             '<p>Details.</p></div>'
         ) in html
 
+    def test_blocks_wrap_generated_div_elements(self):
+        """Blocks mode must reveal built-in div-based elements incrementally."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Generated",
+            content=(
+                "```box\n"
+                "title: Key result\n"
+                "content: Generated box\n"
+                "```\n\n"
+                "```chart\n"
+                "type: bar\n"
+                "data:\n"
+                "  labels: [A]\n"
+                "  datasets:\n"
+                "    - label: Score\n"
+                "      data: [1]\n"
+                "```\n\n"
+                "```conversation\n"
+                "messages:\n"
+                "  - role: user\n"
+                "    content: Hello\n"
+                "```\n\n"
+                "```iframe\n"
+                "src: https://example.com/embed.html\n"
+                "```"
+            ),
+            metadata={"animate": "blocks"},
+        )
+        deck.slides.append(slide)
+
+        html = build_deck(deck)
+
+        assert 'data-fragment-count="4"' in html
+        assert (
+            '<div class="fragment" data-fragment-index="1">'
+            '<div class="colloquium-box'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="2">'
+            '<div class="colloquium-chart-container">'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="3">'
+            '<div class="colloquium-conversation"'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="4">'
+            '<div class="colloquium-iframe-container"'
+        ) in html
+
     def test_step_with_columns_preserves_column_boundaries(self):
         """Step fragments in a column must not wrap sibling column divs."""
         deck = Deck(title="Test")
