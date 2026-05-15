@@ -95,6 +95,7 @@ _STEP_MARKER_RE = re.compile(r"\s*<!--\s*step\s*-->\s*")
 _CLASS_ATTR_RE = re.compile(r'\sclass=(["\'])(.*?)\1')
 _LI_TAG_RE = re.compile(r"<li\b([^>]*)>")
 _GENERATED_FRAGMENT_RE = re.compile(r'\sdata-colloquium-fragment="1"')
+_EMPTY_DIV_RE = re.compile(r"<div\b([^>]*)>\s*</div>", re.DOTALL)
 _FRAGMENT_BLOCK_TAGS = frozenset(
     (
         "h1",
@@ -110,6 +111,7 @@ _FRAGMENT_BLOCK_TAGS = frozenset(
         "blockquote",
         "table",
         "figure",
+        "div",
     )
 )
 
@@ -117,6 +119,17 @@ _FRAGMENT_BLOCK_TAGS = frozenset(
 def _wrap_fragment_html(content: str) -> str:
     """Wrap *content* in a generated fragment container."""
     return f'<div class="fragment" data-colloquium-fragment="1">{content}</div>'
+
+
+def _is_spacer_only_div(html: str) -> bool:
+    """Return True for empty spacer helper divs that should not consume a step."""
+    match = _EMPTY_DIV_RE.fullmatch(html.strip())
+    if not match:
+        return False
+    class_match = _CLASS_ATTR_RE.search(match.group(1))
+    if not class_match:
+        return False
+    return any(cls.startswith("colloquium-spacer-") for cls in class_match.group(2).split())
 
 
 def _contains_generated_fragments(html: str) -> bool:
@@ -180,7 +193,10 @@ def _wrap_blocks_as_fragments(
             block_html = "\n".join(current)
             stripped = block_html.strip()
             if stripped:
-                if preserve_column_markers and stripped == "<p>|||</p>":
+                if (
+                    (preserve_column_markers and stripped == "<p>|||</p>")
+                    or _is_spacer_only_div(stripped)
+                ):
                     blocks.append(block_html)
                 else:
                     blocks.append(_wrap_fragment_html(block_html))
@@ -188,8 +204,12 @@ def _wrap_blocks_as_fragments(
 
     if current:
         block_html = "\n".join(current)
-        if block_html.strip():
-            blocks.append(_wrap_fragment_html(block_html))
+        stripped = block_html.strip()
+        if stripped:
+            if _is_spacer_only_div(stripped):
+                blocks.append(block_html)
+            else:
+                blocks.append(_wrap_fragment_html(block_html))
 
     return "\n".join(blocks)
 
@@ -254,6 +274,10 @@ def _wrap_non_fragment_blocks(html: str) -> str:
     def _emit_block(block_html: str) -> None:
         stripped = block_html.strip()
         if not stripped:
+            return
+        # Spacer helper divs are layout-only; revealing them would be a blank click.
+        if _is_spacer_only_div(stripped):
+            blocks.append(block_html)
             return
         # Already a fragment wrapper div — skip
         if stripped.startswith('<div class="fragment" data-colloquium-fragment="1">'):
