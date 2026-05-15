@@ -1719,6 +1719,33 @@ class TestFragments:
             '<div class="colloquium-iframe-container"'
         ) in html
 
+    def test_blocks_skip_spacer_only_divs(self):
+        """Layout spacer divs should not consume empty reveal steps."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Spacer",
+            content=(
+                "Before\n\n"
+                '<div class="colloquium-spacer-md"></div>\n\n'
+                "```box\n"
+                "title: Key result\n"
+                "content: Generated box\n"
+                "```"
+            ),
+            metadata={"animate": "blocks"},
+        )
+        deck.slides.append(slide)
+
+        html = build_deck(deck)
+
+        assert 'data-fragment-count="2"' in html
+        assert (
+            '<div class="fragment" data-fragment-index="1"><p>Before</p></div>\n'
+            '<div class="colloquium-spacer-md"></div>\n'
+            '<div class="fragment" data-fragment-index="2">'
+            '<div class="colloquium-box'
+        ) in html
+
     def test_step_with_columns_preserves_column_boundaries(self):
         """Step fragments in a column must not wrap sibling column divs."""
         deck = Deck(title="Test")
