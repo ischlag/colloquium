@@ -1498,9 +1498,18 @@ def build_deck(deck: Deck) -> str:
     citation_order = deck.citation_order
     citation_numbers: dict[str, int] = {}
 
+    main_slides = [
+        slide for slide in deck.slides
+        if slide.metadata.get("after") != "references"
+    ]
+    post_reference_slides = [
+        slide for slide in deck.slides
+        if slide.metadata.get("after") == "references"
+    ]
+
     # First pass: build slides and discover cited keys
     cited_keys: list[str] = []
-    total = len(deck.slides)
+    total = len(main_slides)
 
     # If we have bib entries, we need a two-pass approach:
     # first discover citations, then rebuild with correct total (including references slide)
@@ -1524,13 +1533,13 @@ def build_deck(deck: Deck) -> str:
             cited_keys, bib_entries, citation_style, citation_order, citation_numbers,
         )
         if ref_slide_count:
-            total = len(deck.slides) + ref_slide_count
+            total = len(main_slides) + ref_slide_count
 
         # Reset counters for the real build pass
         elements.reset()
 
     slides_html_parts = []
-    for i, slide in enumerate(deck.slides):
+    for i, slide in enumerate(main_slides):
         slide_html = _build_slide_html(
             slide, i, total, md, deck.footer,
             bib_entries=bib_entries,
@@ -1550,9 +1559,30 @@ def build_deck(deck: Deck) -> str:
     if bib_entries and cited_keys:
         ref_slides = _build_references_slides_html(
             bib_entries, cited_keys, citation_style,
-            len(deck.slides), total, deck.footer, citation_order, citation_numbers,
+            len(main_slides), total, deck.footer, citation_order, citation_numbers,
         )
         slides_html_parts.extend(ref_slides)
+
+    post_reference_start = len(main_slides)
+    if bib_entries and cited_keys:
+        post_reference_start += _count_references_slides(
+            cited_keys, bib_entries, citation_style, citation_order, citation_numbers,
+        )
+    for offset, slide in enumerate(post_reference_slides):
+        slide_html = _build_slide_html(
+            slide, post_reference_start + offset, total, md, deck.footer,
+            bib_entries=bib_entries,
+            citation_style=citation_style,
+            cited_keys=cited_keys,
+            citation_order=citation_order,
+            citation_numbers=citation_numbers,
+            deck_figure_captions=deck.figure_captions,
+        )
+        if bib_entries:
+            slide_html = _process_citations(
+                slide_html, bib_entries, citation_style, cited_keys, citation_order, citation_numbers,
+            )
+        slides_html_parts.append(slide_html)
 
     slides_html = "\n\n".join(slides_html_parts)
 

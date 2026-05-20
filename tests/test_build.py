@@ -1264,6 +1264,26 @@ class TestCitationRendering:
             assert "colloquium-slide-meta--left" in html
             assert "Smith" in html
 
+    def test_after_references_slides_render_after_generated_references(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path)
+            deck.slides.append(Slide(title="Intro", content="See [@smith2024]."))
+            deck.slides.append(
+                Slide(
+                    title="Appendix",
+                    content="Extra plot.",
+                    metadata={"after": "references"},
+                )
+            )
+
+            html = build_deck(deck)
+
+            assert html.index("<h2>Intro</h2>") < html.index("<h2>References</h2>")
+            assert html.index("<h2>References</h2>") < html.index("<h2>Appendix</h2>")
+            assert 'data-index="2"' in html[html.index("<h2>Appendix</h2>") - 80:html.index("<h2>Appendix</h2>")]
+            assert "3 / 2" in html
+
     def test_per_slide_cite_right_renders(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             bib_path = self._make_bib(tmpdir)
