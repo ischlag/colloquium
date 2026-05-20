@@ -1264,6 +1264,52 @@ class TestCitationRendering:
             assert "colloquium-slide-meta--left" in html
             assert "Smith" in html
 
+    def test_after_references_slides_render_after_generated_references(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path)
+            deck.slides.append(Slide(title="Intro", content="See [@smith2024]."))
+            deck.slides.append(
+                Slide(
+                    title="Appendix",
+                    content="Extra plot.",
+                    metadata={"after": "references"},
+                )
+            )
+
+            html = build_deck(deck)
+
+            assert html.index("<h2>Intro</h2>") < html.index("<h2>References</h2>")
+            assert html.index("<h2>References</h2>") < html.index("<h2>Appendix</h2>")
+            assert 'data-index="2"' in html[html.index("<h2>Appendix</h2>") - 80:html.index("<h2>Appendix</h2>")]
+            assert "3 / 2" in html
+
+    def test_after_references_citations_use_render_order(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path, citation_style="numeric")
+            deck.slides.append(
+                Slide(
+                    title="Appendix",
+                    content="Appendix cites [@jones2023].",
+                    metadata={"after": "references"},
+                )
+            )
+            deck.slides.append(Slide(title="Main", content="Main cites [@smith2024]."))
+
+            html = build_deck(deck)
+
+            main_start = html.index("<h2>Main</h2>")
+            references_start = html.index("<h2>References</h2>")
+            appendix_start = html.index("<h2>Appendix</h2>")
+            main_html = html[main_start:references_start]
+            references_html = html[references_start:appendix_start]
+            appendix_html = html[appendix_start:]
+
+            assert "[1]" in main_html
+            assert "[2]" in appendix_html
+            assert references_html.index("Smith") < references_html.index("Jones")
+
     def test_per_slide_cite_right_renders(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             bib_path = self._make_bib(tmpdir)
