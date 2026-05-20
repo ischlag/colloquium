@@ -270,6 +270,7 @@ At the slide root, use either `columns:` or `rows:`. For nested layouts, use `ro
 | `<!-- class: name1 name2 -->` | Add CSS classes to the slide |
 | `<!-- style: css-here -->` | Inline CSS on the slide element |
 | `<!-- notes: text -->` | Speaker notes (hidden in presentation) |
+| `<!-- after: references -->` | Move this slide after generated bibliography slides; it is excluded from the footer `{N}` total |
 | `<!-- class: figure-captions -->` | Turn standalone markdown images on that slide into numbered figures with captions taken from `![alt](...)` |
 | `<!-- class: no-figure-captions -->` | Disable deck-wide figure captions for a specific slide |
 | `<!-- img-align: center -->` | Align images only (`left`, `center`, `right`) — title unaffected |
@@ -292,6 +293,20 @@ citation_order: auto
 - `citation_style: numeric` keeps citations and references in first-appearance order.
 - Non-numeric styles default to alphabetical ordering.
 - Set `citation_order: appearance` to keep author-year or title-year citations in source order.
+
+To add appendix or backup slides after the automatically generated references, place them at the end of the markdown and add a slide directive:
+
+```markdown
+---
+
+<!-- after: references -->
+
+## Backup analysis
+
+Extra material
+```
+
+These post-reference slides render after the references section, but they do not contribute to the footer `{N}` total. If the main talk plus generated references totals 30 slides, the first post-reference slide is numbered `31/30`.
 
 ## Content Features
 
