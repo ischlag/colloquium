@@ -17,6 +17,7 @@ One line per PR for easy copy into GitHub releases.
 - Upgrade locked lxml to 6.1.0 to fix CVE-2026-41066 (XXE in iterparse/ETCompatXMLParser) ([#31](https://github.com/natolambert/colloquium/pull/31))
 - Add a built-in iframe element for embedding external or local HTML content ([#32](https://github.com/natolambert/colloquium/pull/32))
 - Add fragment-based animations: `<!-- animate: bullets|blocks -->` and `<!-- step -->` for incremental reveal ([#25](https://github.com/natolambert/colloquium/pull/25))
+- Add `<!-- after: references -->` for post-reference appendix slides excluded from the footer total ([#34](https://github.com/natolambert/colloquium/pull/34))
 
 ## [0.2.1] - 2026-03-25
 

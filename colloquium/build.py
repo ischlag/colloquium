@@ -1506,6 +1506,7 @@ def build_deck(deck: Deck) -> str:
         slide for slide in deck.slides
         if slide.metadata.get("after") == "references"
     ]
+    render_order_slides = main_slides + post_reference_slides
 
     # First pass: build slides and discover cited keys
     cited_keys: list[str] = []
@@ -1515,7 +1516,7 @@ def build_deck(deck: Deck) -> str:
     # first discover citations, then rebuild with correct total (including references slide)
     if bib_entries:
         # Discovery pass — render slides to find cited keys
-        for slide in deck.slides:
+        for slide in render_order_slides:
             if slide.content:
                 rendered = _render_markdown(slide.content, md)
                 _discover_citation_keys(rendered, bib_entries, cited_keys)
