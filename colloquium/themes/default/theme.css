@@ -1148,6 +1148,10 @@ html, body {
     color: var(--colloquium-accent);
 }
 
+body.colloquium-embedded .colloquium-picker-trigger {
+    display: none !important;
+}
+
 /* ===== Present Button ===== */
 .colloquium-present {
     position: fixed;
@@ -1701,6 +1705,7 @@ body:hover .colloquium-present {
 .colloquium-capture .colloquium-present,
 .colloquium-capture .colloquium-progress,
 .colloquium-capture .colloquium-overflow-warn,
+.colloquium-capture .colloquium-picker-trigger,
 .colloquium-capture .colloquium-picker-overlay {
     display: none !important;
 }

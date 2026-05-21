@@ -11,6 +11,10 @@ class ColloquiumPresentation {
         this.totalSlides = this.slides.length;
         this._iframeKeyboardRelayDocuments = new WeakSet();
 
+        if (this._isEmbedded()) {
+            document.body.classList.add('colloquium-embedded');
+        }
+
         // Fragment state: current revealed fragment index per slide (0 = none)
         this.fragmentStates = this.slides.map(() => 0);
         this.fragmentCounts = this.slides.map(
@@ -55,6 +59,14 @@ class ColloquiumPresentation {
             this.goTo(hash - 1);
         } else {
             this.goTo(0);
+        }
+    }
+
+    _isEmbedded() {
+        try {
+            return window.self !== window.top;
+        } catch (_) {
+            return true;
         }
     }
 
