@@ -95,6 +95,7 @@ _STEP_MARKER_RE = re.compile(r"\s*<!--\s*step\s*-->\s*")
 _CLASS_ATTR_RE = re.compile(r'\sclass=(["\'])(.*?)\1')
 _LI_TAG_RE = re.compile(r"<li\b([^>]*)>")
 _GENERATED_FRAGMENT_RE = re.compile(r'\sdata-colloquium-fragment="1"')
+_EMPTY_DIV_RE = re.compile(r"<div\b([^>]*)>\s*</div>", re.DOTALL)
 _FRAGMENT_BLOCK_TAGS = frozenset(
     (
         "h1",
@@ -110,6 +111,7 @@ _FRAGMENT_BLOCK_TAGS = frozenset(
         "blockquote",
         "table",
         "figure",
+        "div",
     )
 )
 
@@ -117,6 +119,17 @@ _FRAGMENT_BLOCK_TAGS = frozenset(
 def _wrap_fragment_html(content: str) -> str:
     """Wrap *content* in a generated fragment container."""
     return f'<div class="fragment" data-colloquium-fragment="1">{content}</div>'
+
+
+def _is_spacer_only_div(html: str) -> bool:
+    """Return True for empty spacer helper divs that should not consume a step."""
+    match = _EMPTY_DIV_RE.fullmatch(html.strip())
+    if not match:
+        return False
+    class_match = _CLASS_ATTR_RE.search(match.group(1))
+    if not class_match:
+        return False
+    return any(cls.startswith("colloquium-spacer-") for cls in class_match.group(2).split())
 
 
 def _contains_generated_fragments(html: str) -> bool:
@@ -180,7 +193,10 @@ def _wrap_blocks_as_fragments(
             block_html = "\n".join(current)
             stripped = block_html.strip()
             if stripped:
-                if preserve_column_markers and stripped == "<p>|||</p>":
+                if (
+                    (preserve_column_markers and stripped == "<p>|||</p>")
+                    or _is_spacer_only_div(stripped)
+                ):
                     blocks.append(block_html)
                 else:
                     blocks.append(_wrap_fragment_html(block_html))
@@ -188,8 +204,12 @@ def _wrap_blocks_as_fragments(
 
     if current:
         block_html = "\n".join(current)
-        if block_html.strip():
-            blocks.append(_wrap_fragment_html(block_html))
+        stripped = block_html.strip()
+        if stripped:
+            if _is_spacer_only_div(stripped):
+                blocks.append(block_html)
+            else:
+                blocks.append(_wrap_fragment_html(block_html))
 
     return "\n".join(blocks)
 
@@ -254,6 +274,10 @@ def _wrap_non_fragment_blocks(html: str) -> str:
     def _emit_block(block_html: str) -> None:
         stripped = block_html.strip()
         if not stripped:
+            return
+        # Spacer helper divs are layout-only; revealing them would be a blank click.
+        if _is_spacer_only_div(stripped):
+            blocks.append(block_html)
             return
         # Already a fragment wrapper div — skip
         if stripped.startswith('<div class="fragment" data-colloquium-fragment="1">'):
@@ -1498,15 +1522,25 @@ def build_deck(deck: Deck) -> str:
     citation_order = deck.citation_order
     citation_numbers: dict[str, int] = {}
 
+    main_slides = [
+        slide for slide in deck.slides
+        if slide.metadata.get("after") != "references"
+    ]
+    post_reference_slides = [
+        slide for slide in deck.slides
+        if slide.metadata.get("after") == "references"
+    ]
+    render_order_slides = main_slides + post_reference_slides
+
     # First pass: build slides and discover cited keys
     cited_keys: list[str] = []
-    total = len(deck.slides)
+    total = len(main_slides)
 
     # If we have bib entries, we need a two-pass approach:
     # first discover citations, then rebuild with correct total (including references slide)
     if bib_entries:
         # Discovery pass — render slides to find cited keys
-        for slide in deck.slides:
+        for slide in render_order_slides:
             if slide.content:
                 rendered = _render_markdown(slide.content, md)
                 _discover_citation_keys(rendered, bib_entries, cited_keys)
@@ -1524,13 +1558,13 @@ def build_deck(deck: Deck) -> str:
             cited_keys, bib_entries, citation_style, citation_order, citation_numbers,
         )
         if ref_slide_count:
-            total = len(deck.slides) + ref_slide_count
+            total = len(main_slides) + ref_slide_count
 
         # Reset counters for the real build pass
         elements.reset()
 
     slides_html_parts = []
-    for i, slide in enumerate(deck.slides):
+    for i, slide in enumerate(main_slides):
         slide_html = _build_slide_html(
             slide, i, total, md, deck.footer,
             bib_entries=bib_entries,
@@ -1550,9 +1584,30 @@ def build_deck(deck: Deck) -> str:
     if bib_entries and cited_keys:
         ref_slides = _build_references_slides_html(
             bib_entries, cited_keys, citation_style,
-            len(deck.slides), total, deck.footer, citation_order, citation_numbers,
+            len(main_slides), total, deck.footer, citation_order, citation_numbers,
         )
         slides_html_parts.extend(ref_slides)
+
+    post_reference_start = len(main_slides)
+    if bib_entries and cited_keys:
+        post_reference_start += _count_references_slides(
+            cited_keys, bib_entries, citation_style, citation_order, citation_numbers,
+        )
+    for offset, slide in enumerate(post_reference_slides):
+        slide_html = _build_slide_html(
+            slide, post_reference_start + offset, total, md, deck.footer,
+            bib_entries=bib_entries,
+            citation_style=citation_style,
+            cited_keys=cited_keys,
+            citation_order=citation_order,
+            citation_numbers=citation_numbers,
+            deck_figure_captions=deck.figure_captions,
+        )
+        if bib_entries:
+            slide_html = _process_citations(
+                slide_html, bib_entries, citation_style, cited_keys, citation_order, citation_numbers,
+            )
+        slides_html_parts.append(slide_html)
 
     slides_html = "\n\n".join(slides_html_parts)
 

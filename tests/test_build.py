@@ -1264,6 +1264,52 @@ class TestCitationRendering:
             assert "colloquium-slide-meta--left" in html
             assert "Smith" in html
 
+    def test_after_references_slides_render_after_generated_references(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path)
+            deck.slides.append(Slide(title="Intro", content="See [@smith2024]."))
+            deck.slides.append(
+                Slide(
+                    title="Appendix",
+                    content="Extra plot.",
+                    metadata={"after": "references"},
+                )
+            )
+
+            html = build_deck(deck)
+
+            assert html.index("<h2>Intro</h2>") < html.index("<h2>References</h2>")
+            assert html.index("<h2>References</h2>") < html.index("<h2>Appendix</h2>")
+            assert 'data-index="2"' in html[html.index("<h2>Appendix</h2>") - 80:html.index("<h2>Appendix</h2>")]
+            assert "3 / 2" in html
+
+    def test_after_references_citations_use_render_order(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path, citation_style="numeric")
+            deck.slides.append(
+                Slide(
+                    title="Appendix",
+                    content="Appendix cites [@jones2023].",
+                    metadata={"after": "references"},
+                )
+            )
+            deck.slides.append(Slide(title="Main", content="Main cites [@smith2024]."))
+
+            html = build_deck(deck)
+
+            main_start = html.index("<h2>Main</h2>")
+            references_start = html.index("<h2>References</h2>")
+            appendix_start = html.index("<h2>Appendix</h2>")
+            main_html = html[main_start:references_start]
+            references_html = html[references_start:appendix_start]
+            appendix_html = html[appendix_start:]
+
+            assert "[1]" in main_html
+            assert "[2]" in appendix_html
+            assert references_html.index("Smith") < references_html.index("Jones")
+
     def test_per_slide_cite_right_renders(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             bib_path = self._make_bib(tmpdir)
@@ -1666,6 +1712,84 @@ class TestFragments:
         assert (
             '<div class="fragment" data-fragment-index="2">'
             '<p>Details.</p></div>'
+        ) in html
+
+    def test_blocks_wrap_generated_div_elements(self):
+        """Blocks mode must reveal built-in div-based elements incrementally."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Generated",
+            content=(
+                "```box\n"
+                "title: Key result\n"
+                "content: Generated box\n"
+                "```\n\n"
+                "```chart\n"
+                "type: bar\n"
+                "data:\n"
+                "  labels: [A]\n"
+                "  datasets:\n"
+                "    - label: Score\n"
+                "      data: [1]\n"
+                "```\n\n"
+                "```conversation\n"
+                "messages:\n"
+                "  - role: user\n"
+                "    content: Hello\n"
+                "```\n\n"
+                "```iframe\n"
+                "src: https://example.com/embed.html\n"
+                "```"
+            ),
+            metadata={"animate": "blocks"},
+        )
+        deck.slides.append(slide)
+
+        html = build_deck(deck)
+
+        assert 'data-fragment-count="4"' in html
+        assert (
+            '<div class="fragment" data-fragment-index="1">'
+            '<div class="colloquium-box'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="2">'
+            '<div class="colloquium-chart-container">'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="3">'
+            '<div class="colloquium-conversation"'
+        ) in html
+        assert (
+            '<div class="fragment" data-fragment-index="4">'
+            '<div class="colloquium-iframe-container"'
+        ) in html
+
+    def test_blocks_skip_spacer_only_divs(self):
+        """Layout spacer divs should not consume empty reveal steps."""
+        deck = Deck(title="Test")
+        slide = Slide(
+            title="Spacer",
+            content=(
+                "Before\n\n"
+                '<div class="colloquium-spacer-md"></div>\n\n'
+                "```box\n"
+                "title: Key result\n"
+                "content: Generated box\n"
+                "```"
+            ),
+            metadata={"animate": "blocks"},
+        )
+        deck.slides.append(slide)
+
+        html = build_deck(deck)
+
+        assert 'data-fragment-count="2"' in html
+        assert (
+            '<div class="fragment" data-fragment-index="1"><p>Before</p></div>\n'
+            '<div class="colloquium-spacer-md"></div>\n'
+            '<div class="fragment" data-fragment-index="2">'
+            '<div class="colloquium-box'
         ) in html
 
     def test_step_with_columns_preserves_column_boundaries(self):

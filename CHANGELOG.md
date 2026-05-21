@@ -11,6 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Fix block animations for generated div-based elements ([#33](https://github.com/natolambert/colloquium/pull/33))
 - Bind dev server to loopback, change default port to 8090, and error on port conflicts ([#28](https://github.com/natolambert/colloquium/pull/28))
 - Upgrade locked Pillow to 12.2.0 to fix CVE-2026-40192 ([#29](https://github.com/natolambert/colloquium/pull/29))
 - Upgrade locked pytest to 9.0.3 and Pygments to 2.20.0 to fix CVE-2025-71176 and CVE-2026-4539 ([#30](https://github.com/natolambert/colloquium/pull/30))
@@ -18,6 +19,7 @@ One line per PR for easy copy into GitHub releases.
 - Add a built-in iframe element for embedding external or local HTML content ([#32](https://github.com/natolambert/colloquium/pull/32))
 - Add fragment-based animations: `<!-- animate: bullets|blocks -->` and `<!-- step -->` for incremental reveal ([#25](https://github.com/natolambert/colloquium/pull/25))
 - Hide the mobile slide picker trigger when decks are embedded in iframes ([#35](https://github.com/natolambert/colloquium/pull/35))
+- Add `<!-- after: references -->` for post-reference appendix slides excluded from the footer total ([#34](https://github.com/natolambert/colloquium/pull/34))
 
 ## [0.2.1] - 2026-03-25
 

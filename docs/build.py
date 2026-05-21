@@ -347,6 +347,7 @@ uv run colloquium export examples/hello/hello.md  # export PDF via Chromium</cod
         <li>Markdown native</li>
         <li>Equations and code highlighting</li>
         <li>BibTeX via Pybtex</li>
+        <li>Post-reference appendix slides</li>
         <li>Charts</li>
       </ul>
       <p class="muted">More coming soon.</p>

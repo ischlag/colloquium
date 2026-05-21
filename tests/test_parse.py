@@ -189,6 +189,11 @@ class TestParseSlide:
         slide = parse_slide(text)
         assert "size-small" in slide.classes
 
+    def test_after_references_directive(self):
+        text = "<!-- after: references -->\n## Appendix\n\nExtra material"
+        slide = parse_slide(text)
+        assert slide.metadata.get("after") == "references"
+
     def test_img_overflow_directive(self):
         text = "<!-- img-overflow: true -->\n## Slide\n\n![Alt](figure.png)"
         slide = parse_slide(text)
