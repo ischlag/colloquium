@@ -408,17 +408,27 @@ def _parse_bib_file(path: str) -> dict:
         return {}
 
 
+def _person_surname(person) -> str:
+    """Full last name of a pybtex Person: join multi-word names, drop BibTeX braces.
+
+    pybtex splits an unprotected "Ben Allal" into ["Ben", "Allal"] (so taking only
+    the first token drops "Allal"), and keeps the braces from a protected
+    "{Ben Allal}" (so it renders literally). Joining the parts and normalizing
+    handles both.
+    """
+    surnames = person.last_names
+    if surnames:
+        return _normalize_bibtex_field(" ".join(surnames))
+    return _normalize_bibtex_field(str(person))
+
+
 def _get_author_surname(entry) -> str:
     """Extract the first author's surname from a pybtex entry."""
     try:
         persons = entry.persons.get("author", [])
         if not persons:
             return "Unknown"
-        first = persons[0]
-        surnames = first.last_names
-        if surnames:
-            return surnames[0]
-        return str(first)
+        return _person_surname(persons[0])
     except Exception:
         return "Unknown"
 
@@ -500,9 +510,7 @@ def _format_citation_label(entry, key: str, style: str, number: int) -> str:
         if len(authors) > 2:
             surname += " et al."
         elif len(authors) == 2:
-            second = authors[1].last_names
-            if second:
-                surname += f" & {second[0]}"
+            surname += f" & {_person_surname(authors[1])}"
         return f"{surname}, {_get_year(entry)}"
 
 
@@ -624,7 +632,7 @@ def _format_reference(entry, key: str, style: str, number: int) -> str:
     authors = entry.persons.get("author", [])
     author_strs = []
     for person in authors:
-        surnames = " ".join(person.last_names)
+        surnames = _person_surname(person)
         firsts = " ".join(n[0] + "." for n in person.first_names if n) if person.first_names else ""
         if firsts:
             author_strs.append(f"{surnames}, {firsts}")
