@@ -680,7 +680,7 @@ html, body {
 /* ===== Utility: Title Position ===== */
 .title-top.active { justify-content: flex-start; }
 .title-center.active { justify-content: center; }
-.title-center.active h1, .title-center.active h2 { text-align: center; }
+.title-center.active > h1, .title-center.active > h2 { text-align: center; }
 .title-hidden h1, .title-hidden h2 { display: none; }
 
 /* ===== Utility: Text Alignment ===== */
@@ -1630,7 +1630,7 @@ body:hover .colloquium-present {
 
     .title-top { justify-content: flex-start; }
     .title-center { justify-content: center; }
-    .title-center h1, .title-center h2 { text-align: center; }
+    .title-center > h1, .title-center > h2 { text-align: center; }
 
     .align-left { text-align: left; }
     .align-center { text-align: center; }
