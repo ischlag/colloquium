@@ -11,6 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Don't advance slides when selecting/copying text — a click-drag or active text selection no longer triggers navigation ([#37](https://github.com/natolambert/colloquium/pull/37))
 - Fix `title: center` leaking center alignment to the whole slide body, and citation author surnames (keep full multi-word names, strip BibTeX braces) ([#36](https://github.com/natolambert/colloquium/pull/36))
 - Fix block animations for generated div-based elements ([#33](https://github.com/natolambert/colloquium/pull/33))
 - Bind dev server to loopback, change default port to 8090, and error on port conflicts ([#28](https://github.com/natolambert/colloquium/pull/28))

@@ -399,6 +399,17 @@ class ColloquiumPresentation {
     }
 
     _bindClick() {
+        // Track the pointer-down position so we can tell a click from a drag.
+        // A drag (mouse moved between down and up) means the user was selecting
+        // text or otherwise interacting, not trying to advance the slide.
+        let downX = 0;
+        let downY = 0;
+        const DRAG_THRESHOLD = 8; // px of movement that counts as a drag, not a click
+        document.addEventListener('mousedown', (e) => {
+            downX = e.clientX;
+            downY = e.clientY;
+        });
+
         document.addEventListener('click', (e) => {
             // Handle citation links — navigate to the slide containing the target ref
             const citeLink = e.target.closest('a.colloquium-cite');
@@ -421,6 +432,14 @@ class ColloquiumPresentation {
 
             // Ignore clicks on links, interactive elements, footer, and picker
             if (e.target.closest('a, button, input, textarea, select, .colloquium-footer, .colloquium-picker-overlay, .colloquium-present, .colloquium-picker-trigger')) return;
+
+            // Don't navigate if the user is highlighting/copying text. A drag
+            // (pointer moved between down and up) or a live text selection both
+            // mean "select", not "next slide".
+            const dragDistance = Math.hypot(e.clientX - downX, e.clientY - downY);
+            if (dragDistance > DRAG_THRESHOLD) return;
+            const selection = window.getSelection();
+            if (selection && !selection.isCollapsed && selection.toString().trim()) return;
 
             const x = e.clientX / window.innerWidth;
             if (x < 0.33) {
