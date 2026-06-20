@@ -1703,12 +1703,37 @@ body:hover .colloquium-present {
     }
 }
 
+/* ===== Toast (transient confirmation, e.g. "Copied slide markdown") ===== */
+.colloquium-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    z-index: 1000;
+    padding: 8px 16px;
+    border-radius: 6px;
+    background: rgba(20, 20, 20, 0.92);
+    color: #fff;
+    font-size: 14px;
+    font-family: var(--colloquium-font-body, sans-serif);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.colloquium-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
 /* ===== Capture mode — hide UI chrome for headless screenshots ===== */
 .colloquium-capture .colloquium-present,
 .colloquium-capture .colloquium-progress,
 .colloquium-capture .colloquium-overflow-warn,
 .colloquium-capture .colloquium-picker-trigger,
-.colloquium-capture .colloquium-picker-overlay {
+.colloquium-capture .colloquium-picker-overlay,
+.colloquium-capture .colloquium-toast {
     display: none !important;
 }
 

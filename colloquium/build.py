@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import html as html_module
 import re
 import tempfile
@@ -1253,7 +1254,12 @@ def _build_slide_html(
     inner = "\n".join(parts)
 
     fragment_attr = f' data-fragment-count="{fragment_count}"' if fragment_count > 0 else ""
-    return f'<section class="{class_str}"{slide_style_attr} data-index="{index}"{fragment_attr}>\n{inner}\n</section>'
+    # Embed the slide's markdown source (base64 of UTF-8) so the presentation
+    # engine can copy it to the clipboard. Base64 sidesteps all HTML-escaping
+    # and unicode pitfalls of carrying raw markdown in an attribute.
+    md_source = base64.b64encode(slide.to_markdown().encode("utf-8")).decode("ascii")
+    md_attr = f' data-colloquium-md="{md_source}"'
+    return f'<section class="{class_str}"{slide_style_attr} data-index="{index}"{fragment_attr}{md_attr}>\n{inner}\n</section>'
 
 
 # HTML template — uses $-style substitution
