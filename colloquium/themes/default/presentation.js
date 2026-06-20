@@ -342,6 +342,14 @@ class ColloquiumPresentation {
                 e.preventDefault();
                 this.last();
                 break;
+            case 'c':
+            case 'C':
+                // Plain 'c' copies the current slide's markdown source.
+                // Leave Cmd/Ctrl+C alone so the browser can copy selected text.
+                if (e.metaKey || e.ctrlKey || e.altKey) return;
+                e.preventDefault();
+                this._copyCurrentSlideMarkdown();
+                break;
             case 'f':
             case 'F':
                 e.preventDefault();
@@ -399,6 +407,17 @@ class ColloquiumPresentation {
     }
 
     _bindClick() {
+        // Track the pointer-down position so we can tell a click from a drag.
+        // A drag (mouse moved between down and up) means the user was selecting
+        // text or otherwise interacting, not trying to advance the slide.
+        let downX = 0;
+        let downY = 0;
+        const DRAG_THRESHOLD = 8; // px of movement that counts as a drag, not a click
+        document.addEventListener('mousedown', (e) => {
+            downX = e.clientX;
+            downY = e.clientY;
+        });
+
         document.addEventListener('click', (e) => {
             // Handle citation links — navigate to the slide containing the target ref
             const citeLink = e.target.closest('a.colloquium-cite');
@@ -421,6 +440,19 @@ class ColloquiumPresentation {
 
             // Ignore clicks on links, interactive elements, footer, and picker
             if (e.target.closest('a, button, input, textarea, select, .colloquium-footer, .colloquium-picker-overlay, .colloquium-present, .colloquium-picker-trigger')) return;
+
+            // Don't navigate if the user is highlighting/copying text. A drag
+            // (pointer moved between down and up) or a live text selection both
+            // mean "select", not "next slide".
+            const dragDistance = Math.hypot(e.clientX - downX, e.clientY - downY);
+            if (dragDistance > DRAG_THRESHOLD) return;
+            // A multi-click (double/triple) is a word/paragraph selection gesture,
+            // not navigation. This catches the later clicks of a multi-click; the
+            // very first click can't be distinguished without deferring all
+            // navigation, which we avoid so slide clicks stay snappy.
+            if (e.detail > 1) return;
+            const selection = window.getSelection();
+            if (selection && !selection.isCollapsed && selection.toString().trim()) return;
 
             const x = e.clientX / window.innerWidth;
             if (x < 0.33) {
@@ -470,6 +502,78 @@ class ColloquiumPresentation {
         } else {
             document.documentElement.requestFullscreen().catch(() => {});
         }
+    }
+
+    // --- Copy slide as markdown ---
+
+    _decodeMarkdown(b64) {
+        // base64 (UTF-8) → string, so unicode math/symbols round-trip cleanly.
+        const binary = atob(b64);
+        const bytes = Uint8Array.from(binary, c => c.charCodeAt(0));
+        return new TextDecoder().decode(bytes);
+    }
+
+    _copyCurrentSlideMarkdown() {
+        const slide = this.slides[this.currentIndex];
+        const encoded = slide && slide.getAttribute('data-colloquium-md');
+        if (!encoded) {
+            this._showToast('No markdown source for this slide');
+            return;
+        }
+        let markdown;
+        try {
+            markdown = this._decodeMarkdown(encoded);
+        } catch (_) {
+            this._showToast('Could not read slide markdown');
+            return;
+        }
+        const done = () => this._showToast('Copied slide markdown');
+        const fail = () => this._showToast('Copy failed — clipboard blocked');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(markdown).then(done, () => {
+                if (!this._copyViaTextarea(markdown)) fail();
+                else done();
+            });
+        } else if (this._copyViaTextarea(markdown)) {
+            done();
+        } else {
+            fail();
+        }
+    }
+
+    _copyViaTextarea(text) {
+        // Fallback for insecure contexts (file://, plain http) where the async
+        // Clipboard API is unavailable.
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-1000px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+            ok = document.execCommand('copy');
+        } catch (_) {
+            ok = false;
+        }
+        document.body.removeChild(ta);
+        return ok;
+    }
+
+    _showToast(message) {
+        if (!this._toast) {
+            this._toast = document.createElement('div');
+            this._toast.className = 'colloquium-toast';
+            document.body.appendChild(this._toast);
+        }
+        this._toast.textContent = message;
+        this._toast.classList.add('visible');
+        clearTimeout(this._toastTimer);
+        this._toastTimer = setTimeout(() => {
+            this._toast.classList.remove('visible');
+        }, 1500);
     }
 }
 
