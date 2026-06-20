@@ -11,6 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-06-19
+
 - Make slide text easier to get out: click-drag/selection no longer advances the slide, and press `c` to copy the current slide's markdown source to the clipboard ([#37](https://github.com/natolambert/colloquium/pull/37))
 - Fix `title: center` leaking center alignment to the whole slide body, and citation author surnames (keep full multi-word names, strip BibTeX braces) ([#36](https://github.com/natolambert/colloquium/pull/36))
 - Fix block animations for generated div-based elements ([#33](https://github.com/natolambert/colloquium/pull/33))
