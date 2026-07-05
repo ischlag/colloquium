@@ -11,6 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Update presentation navigation: left/right jump directly between slides, up/down still controls reveal steps, typed slide numbers jump to pages, and the hello deck documents the controls ([#38](https://github.com/natolambert/colloquium/pull/38))
+
 ## [0.2.2] - 2026-06-19
 
 - Make slide text easier to get out: click-drag/selection no longer advances the slide, and press `c` to copy the current slide's markdown source to the clipboard ([#37](https://github.com/natolambert/colloquium/pull/37))

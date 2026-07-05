@@ -10,6 +10,9 @@ class ColloquiumPresentation {
         this.currentIndex = 0;
         this.totalSlides = this.slides.length;
         this._iframeKeyboardRelayDocuments = new WeakSet();
+        this.slideNumberBuffer = '';
+        this.slideNumberTimer = null;
+        this.slideNumberCommitDelay = 700;
 
         if (this._isEmbedded()) {
             document.body.classList.add('colloquium-embedded');
@@ -174,12 +177,101 @@ class ColloquiumPresentation {
         }
     }
 
+    nextSlide() {
+        this.goTo(this.currentIndex + 1);
+    }
+
+    prevSlide() {
+        this.goTo(this.currentIndex - 1, true);
+    }
+
     first() {
         this.goTo(0);
     }
 
     last() {
         this.goTo(this.totalSlides - 1, true);
+    }
+
+    // --- Numeric Slide Jump ---
+
+    _handleSlideNumberKey(e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return false;
+
+        if (/^\d$/.test(e.key)) {
+            e.preventDefault();
+            this._appendSlideNumberDigit(e.key);
+            return true;
+        }
+
+        if (!this.slideNumberBuffer) return false;
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            this._commitSlideNumberBuffer();
+            return true;
+        }
+
+        if (e.key === 'Backspace') {
+            e.preventDefault();
+            this._removeSlideNumberDigit();
+            return true;
+        }
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this._clearSlideNumberBuffer();
+            return true;
+        }
+
+        this._clearSlideNumberBuffer();
+        return false;
+    }
+
+    _appendSlideNumberDigit(digit) {
+        this.slideNumberBuffer += digit;
+        clearTimeout(this.slideNumberTimer);
+
+        const maxDigits = String(this.totalSlides).length;
+        if (this.slideNumberBuffer.length >= maxDigits) {
+            this._commitSlideNumberBuffer();
+            return;
+        }
+
+        this.slideNumberTimer = setTimeout(() => {
+            this._commitSlideNumberBuffer();
+        }, this.slideNumberCommitDelay);
+    }
+
+    _removeSlideNumberDigit() {
+        this.slideNumberBuffer = this.slideNumberBuffer.slice(0, -1);
+        clearTimeout(this.slideNumberTimer);
+
+        if (this.slideNumberBuffer) {
+            this.slideNumberTimer = setTimeout(() => {
+                this._commitSlideNumberBuffer();
+            }, this.slideNumberCommitDelay);
+        }
+    }
+
+    _commitSlideNumberBuffer() {
+        if (!this.slideNumberBuffer) return;
+
+        const slideNumber = parseInt(this.slideNumberBuffer, 10);
+        this._clearSlideNumberBuffer();
+
+        if (slideNumber >= 1 && slideNumber <= this.totalSlides) {
+            if (this.pickerOpen) this._closePicker();
+            this.goTo(slideNumber - 1);
+        } else {
+            this._showToast('No slide ' + slideNumber);
+        }
+    }
+
+    _clearSlideNumberBuffer() {
+        this.slideNumberBuffer = '';
+        clearTimeout(this.slideNumberTimer);
+        this.slideNumberTimer = null;
     }
 
     // --- Fragment Management ---
@@ -320,8 +412,13 @@ class ColloquiumPresentation {
     }
 
     _handleNavigationKey(e) {
+        if (this._handleSlideNumberKey(e)) return;
+
         switch (e.key) {
             case 'ArrowRight':
+                e.preventDefault();
+                this.nextSlide();
+                break;
             case 'ArrowDown':
             case ' ':
             case 'PageDown':
@@ -329,6 +426,9 @@ class ColloquiumPresentation {
                 this.next();
                 break;
             case 'ArrowLeft':
+                e.preventDefault();
+                this.prevSlide();
+                break;
             case 'ArrowUp':
             case 'PageUp':
                 e.preventDefault();

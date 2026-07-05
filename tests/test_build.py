@@ -1606,6 +1606,54 @@ class TestFragments:
         assert "fragmentStates" in html
         assert "_updateFragments" in html
 
+    def test_left_right_arrows_jump_slides_while_up_down_steps_fragments(self):
+        deck = Deck(title="Test")
+        deck.add_slide(title="S1", content="A\n\n<!-- step -->\n\nB")
+        deck.add_slide(title="S2", content="C")
+        html = build_deck(deck)
+
+        import re
+
+        assert "nextSlide() {" in html
+        assert "prevSlide() {" in html
+        assert "this.goTo(this.currentIndex + 1);" in html
+        assert "this.goTo(this.currentIndex - 1, true);" in html
+        assert re.search(
+            r"case 'ArrowRight':\s+e\.preventDefault\(\);\s+this\.nextSlide\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowLeft':\s+e\.preventDefault\(\);\s+this\.prevSlide\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowDown':\s+case ' ':\s+case 'PageDown':\s+"
+            r"e\.preventDefault\(\);\s+this\.next\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowUp':\s+case 'PageUp':\s+"
+            r"e\.preventDefault\(\);\s+this\.prev\(\);",
+            html,
+        )
+
+    def test_number_keys_buffer_direct_slide_jump(self):
+        deck = Deck(title="Test")
+        for i in range(20):
+            deck.add_slide(title=f"S{i + 1}", content="Body")
+        html = build_deck(deck)
+
+        assert "this.slideNumberBuffer = '';" in html
+        assert "this.slideNumberCommitDelay = 700;" in html
+        assert "if (this._handleSlideNumberKey(e)) return;" in html
+        assert "if (/^\\d$/.test(e.key)) {" in html
+        assert "this._appendSlideNumberDigit(e.key);" in html
+        assert "if (e.key === 'Enter') {" in html
+        assert "this._commitSlideNumberBuffer();" in html
+        assert "this.slideNumberBuffer += digit;" in html
+        assert "this.slideNumberBuffer.length >= maxDigits" in html
+        assert "this.goTo(slideNumber - 1);" in html
+
     def test_li_with_arbitrary_attributes_gets_fragment_index(self):
         """Bullets with any attribute order must still get data-fragment-index."""
         from colloquium.build import _apply_auto_animate, _number_fragments
