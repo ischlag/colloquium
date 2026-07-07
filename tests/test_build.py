@@ -1606,6 +1606,71 @@ class TestFragments:
         assert "fragmentStates" in html
         assert "_updateFragments" in html
 
+    def test_left_right_step_fragments_while_up_down_jumps_slides(self):
+        deck = Deck(title="Test")
+        deck.add_slide(title="S1", content="A\n\n<!-- step -->\n\nB")
+        deck.add_slide(title="S2", content="C")
+        html = build_deck(deck)
+
+        import re
+
+        # Jump-style navigation lands fully revealed (showAllFragments=true).
+        assert re.search(
+            r"nextSlide\(\) \{\s+this\.goTo\(this\.currentIndex \+ 1, true\);",
+            html,
+        )
+        assert re.search(
+            r"prevSlide\(\) \{\s+this\.goTo\(this\.currentIndex - 1, true\);",
+            html,
+        )
+        # Left/Right (and Space/PageDown) advance through fragments then slides.
+        assert re.search(
+            r"case 'ArrowRight':\s+case ' ':\s+case 'PageDown':\s+"
+            r"e\.preventDefault\(\);\s+this\.next\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowLeft':\s+case 'PageUp':\s+"
+            r"e\.preventDefault\(\);\s+this\.prev\(\);",
+            html,
+        )
+        # Up/Down jump whole slides, skipping fragments.
+        assert re.search(
+            r"case 'ArrowDown':\s+e\.preventDefault\(\);\s+this\.nextSlide\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowUp':\s+e\.preventDefault\(\);\s+this\.prevSlide\(\);",
+            html,
+        )
+
+    def test_number_keys_buffer_direct_slide_jump(self):
+        deck = Deck(title="Test")
+        for i in range(20):
+            deck.add_slide(title=f"S{i + 1}", content="Body")
+        html = build_deck(deck)
+
+        assert "this.slideNumberBuffer = '';" in html
+        assert "this.slideNumberCommitDelay = 700;" in html
+        assert "if (this._handleSlideNumberKey(e)) return;" in html
+        assert "if (/^\\d$/.test(e.key)) {" in html
+        assert "this._appendSlideNumberDigit(e.key);" in html
+        assert "if (e.key === 'Enter') {" in html
+        assert "this._commitSlideNumberBuffer();" in html
+        assert "this.slideNumberBuffer += digit;" in html
+        assert "this.slideNumberBuffer.length >= maxDigits" in html
+        # Numeric jumps land fully revealed, like all jump-style navigation.
+        assert "this.goTo(slideNumber - 1, true);" in html
+        # goTo cancels any pending numeric jump so a stale digit can't fire
+        # after the user navigates by click/touch/hash/picker; next()/prev()
+        # cancel too, since fragment steps bypass goTo.
+        assert "Cancel any pending numeric jump" in html
+        assert "Fragment steps bypass goTo" in html
+        # Opening or dismissing the picker cancels a pending digit too, so a
+        # stale timer can't close the picker mid-browse and jump away.
+        assert "Opening the picker cancels a pending numeric jump" in html
+        assert "Dismissing the picker also cancels a pending numeric jump" in html
+
     def test_li_with_arbitrary_attributes_gets_fragment_index(self):
         """Bullets with any attribute order must still get data-fragment-index."""
         from colloquium.build import _apply_auto_animate, _number_fragments

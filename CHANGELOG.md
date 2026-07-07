@@ -11,6 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Update presentation navigation: left/right step through reveal states then slides; up/down, typed slide numbers, and the picker jump straight to a slide with all reveals shown ([#39](https://github.com/natolambert/colloquium/pull/39))
+
 ## [0.2.2] - 2026-06-19
 
 - Make slide text easier to get out: click-drag/selection no longer advances the slide, and press `c` to copy the current slide's markdown source to the clipboard ([#37](https://github.com/natolambert/colloquium/pull/37))

@@ -10,6 +10,9 @@ class ColloquiumPresentation {
         this.currentIndex = 0;
         this.totalSlides = this.slides.length;
         this._iframeKeyboardRelayDocuments = new WeakSet();
+        this.slideNumberBuffer = '';
+        this.slideNumberTimer = null;
+        this.slideNumberCommitDelay = 700;
 
         if (this._isEmbedded()) {
             document.body.classList.add('colloquium-embedded');
@@ -116,6 +119,12 @@ class ColloquiumPresentation {
     goTo(index, showAllFragments = false) {
         if (index < 0 || index >= this.totalSlides) return;
 
+        // Cancel any pending numeric jump. The numeric commit path clears the
+        // buffer before calling goTo, so this is a no-op there; every other
+        // navigation path (click, touch, hash, picker, arrows) cancels a stale
+        // digit that would otherwise fire later and snap the deck unexpectedly.
+        this._clearSlideNumberBuffer();
+
         this.slides[this.currentIndex].classList.remove('active');
         this.currentIndex = index;
         this.slides[this.currentIndex].classList.add('active');
@@ -154,6 +163,9 @@ class ColloquiumPresentation {
     }
 
     next() {
+        // Fragment steps bypass goTo, so cancel any pending numeric jump here
+        // too (click/swipe advancing a fragment must not let a stale digit fire).
+        this._clearSlideNumberBuffer();
         const fc = this.fragmentCounts[this.currentIndex];
         const fs = this.fragmentStates[this.currentIndex];
         if (fc > 0 && fs < fc) {
@@ -165,6 +177,7 @@ class ColloquiumPresentation {
     }
 
     prev() {
+        this._clearSlideNumberBuffer();
         const fs = this.fragmentStates[this.currentIndex];
         if (fs > 0) {
             this.fragmentStates[this.currentIndex] = fs - 1;
@@ -174,12 +187,104 @@ class ColloquiumPresentation {
         }
     }
 
+    // Jump-style navigation lands with all fragments revealed: jumping means
+    // skimming or referencing finished content, not presenting the build-up.
+    // Only Right/Left (next/prev) step through fragments.
+    nextSlide() {
+        this.goTo(this.currentIndex + 1, true);
+    }
+
+    prevSlide() {
+        this.goTo(this.currentIndex - 1, true);
+    }
+
     first() {
         this.goTo(0);
     }
 
     last() {
         this.goTo(this.totalSlides - 1, true);
+    }
+
+    // --- Numeric Slide Jump ---
+
+    _handleSlideNumberKey(e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return false;
+
+        if (/^\d$/.test(e.key)) {
+            e.preventDefault();
+            this._appendSlideNumberDigit(e.key);
+            return true;
+        }
+
+        if (!this.slideNumberBuffer) return false;
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            this._commitSlideNumberBuffer();
+            return true;
+        }
+
+        if (e.key === 'Backspace') {
+            e.preventDefault();
+            this._removeSlideNumberDigit();
+            return true;
+        }
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this._clearSlideNumberBuffer();
+            return true;
+        }
+
+        this._clearSlideNumberBuffer();
+        return false;
+    }
+
+    _appendSlideNumberDigit(digit) {
+        this.slideNumberBuffer += digit;
+        clearTimeout(this.slideNumberTimer);
+
+        const maxDigits = String(this.totalSlides).length;
+        if (this.slideNumberBuffer.length >= maxDigits) {
+            this._commitSlideNumberBuffer();
+            return;
+        }
+
+        this.slideNumberTimer = setTimeout(() => {
+            this._commitSlideNumberBuffer();
+        }, this.slideNumberCommitDelay);
+    }
+
+    _removeSlideNumberDigit() {
+        this.slideNumberBuffer = this.slideNumberBuffer.slice(0, -1);
+        clearTimeout(this.slideNumberTimer);
+
+        if (this.slideNumberBuffer) {
+            this.slideNumberTimer = setTimeout(() => {
+                this._commitSlideNumberBuffer();
+            }, this.slideNumberCommitDelay);
+        }
+    }
+
+    _commitSlideNumberBuffer() {
+        if (!this.slideNumberBuffer) return;
+
+        const slideNumber = parseInt(this.slideNumberBuffer, 10);
+        this._clearSlideNumberBuffer();
+
+        if (slideNumber >= 1 && slideNumber <= this.totalSlides) {
+            if (this.pickerOpen) this._closePicker();
+            this.goTo(slideNumber - 1, true);
+        } else {
+            this._showToast('No slide ' + slideNumber);
+        }
+    }
+
+    _clearSlideNumberBuffer() {
+        this.slideNumberBuffer = '';
+        clearTimeout(this.slideNumberTimer);
+        this.slideNumberTimer = null;
     }
 
     // --- Fragment Management ---
@@ -225,7 +330,7 @@ class ColloquiumPresentation {
                 '<span class="colloquium-picker-title">' + this._getSlideTitle(slide, i) + '</span>';
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.goTo(i);
+                this.goTo(i, true);
                 this._closePicker();
             });
             this.pickerItems.push(btn);
@@ -244,6 +349,10 @@ class ColloquiumPresentation {
     }
 
     _openPicker() {
+        // Opening the picker cancels a pending numeric jump — otherwise the
+        // stale timer fires mid-browse, closing the picker and jumping away.
+        this._clearSlideNumberBuffer();
+
         // Highlight current slide
         this.pickerItems.forEach((btn, i) => {
             btn.classList.toggle('current', i === this.currentIndex);
@@ -259,6 +368,10 @@ class ColloquiumPresentation {
     }
 
     _closePicker() {
+        // Dismissing the picker also cancels a pending numeric jump (the
+        // commit path clears its buffer before closing, so this is a no-op
+        // there).
+        this._clearSlideNumberBuffer();
         this.overlay.classList.remove('active');
         this.pickerOpen = false;
     }
@@ -320,19 +433,31 @@ class ColloquiumPresentation {
     }
 
     _handleNavigationKey(e) {
+        if (this._handleSlideNumberKey(e)) return;
+
         switch (e.key) {
+            // Left/Right (and Space/PageDown) step through fragments then
+            // slides — the familiar PowerPoint/Keynote "advance" axis.
             case 'ArrowRight':
-            case 'ArrowDown':
             case ' ':
             case 'PageDown':
                 e.preventDefault();
                 this.next();
                 break;
             case 'ArrowLeft':
-            case 'ArrowUp':
             case 'PageUp':
                 e.preventDefault();
                 this.prev();
+                break;
+            // Up/Down jump whole slides, skipping fragments — a fast axis for
+            // moving past fragment-heavy slides.
+            case 'ArrowDown':
+                e.preventDefault();
+                this.nextSlide();
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                this.prevSlide();
                 break;
             case 'Home':
                 e.preventDefault();
