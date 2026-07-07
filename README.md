@@ -610,7 +610,7 @@ A **References** slide is automatically appended with only the cited works.
 | End | Last slide |
 | C | Copy current slide's markdown source |
 | F | Toggle fullscreen |
-| Escape | Cancel typed number / close picker / exit fullscreen |
+| Escape | Cancel typed number / close picker / exit fullscreen (while fullscreen, the browser always exits fullscreen on Esc — that part can't be deferred) |
 
 Click the slide counter to open the slide picker. Click left 1/3 of screen to go back, right 2/3 to go forward.
 
