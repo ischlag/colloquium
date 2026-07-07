@@ -51,8 +51,8 @@ Nathan Lambert
 <!-- animate: bullets -->
 
 - `←` / `→` step through animations, then move between slides
-- `↑` / `↓` jump straight to the previous / next slide, skipping animations
-- Type a slide number to jump directly to that page
+- `↑` / `↓` jump straight to the previous / next slide, fully revealed
+- Type a slide number to jump directly to that page, fully revealed
 - Multi-digit numbers are buffered: typing `19` goes to slide 19, not slide 1 and then slide 9
 
 ---

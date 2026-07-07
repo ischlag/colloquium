@@ -187,8 +187,11 @@ class ColloquiumPresentation {
         }
     }
 
+    // Jump-style navigation lands with all fragments revealed: jumping means
+    // skimming or referencing finished content, not presenting the build-up.
+    // Only Right/Left (next/prev) step through fragments.
     nextSlide() {
-        this.goTo(this.currentIndex + 1);
+        this.goTo(this.currentIndex + 1, true);
     }
 
     prevSlide() {
@@ -272,7 +275,7 @@ class ColloquiumPresentation {
 
         if (slideNumber >= 1 && slideNumber <= this.totalSlides) {
             if (this.pickerOpen) this._closePicker();
-            this.goTo(slideNumber - 1);
+            this.goTo(slideNumber - 1, true);
         } else {
             this._showToast('No slide ' + slideNumber);
         }
@@ -327,7 +330,7 @@ class ColloquiumPresentation {
                 '<span class="colloquium-picker-title">' + this._getSlideTitle(slide, i) + '</span>';
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.goTo(i);
+                this.goTo(i, true);
                 this._closePicker();
             });
             this.pickerItems.push(btn);

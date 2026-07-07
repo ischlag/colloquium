@@ -604,8 +604,8 @@ A **References** slide is automatically appended with only the cited works.
 |-----|--------|
 | Right / Space / PgDn | Advance: next reveal step, then next slide |
 | Left / PgUp | Back: previous reveal step, then previous slide |
-| Down / Up | Next / previous slide, skipping reveal steps |
-| 1–9 | Type a slide number to jump to it (Enter commits early, Esc cancels) |
+| Down / Up | Jump to next / previous slide, fully revealed |
+| 1–9 | Type a slide number to jump to it, fully revealed (Enter commits early, Esc cancels) |
 | Home | First slide |
 | End | Last slide |
 | C | Copy current slide's markdown source |

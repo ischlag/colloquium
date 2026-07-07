@@ -1614,10 +1614,15 @@ class TestFragments:
 
         import re
 
-        assert "nextSlide() {" in html
-        assert "prevSlide() {" in html
-        assert "this.goTo(this.currentIndex + 1);" in html
-        assert "this.goTo(this.currentIndex - 1, true);" in html
+        # Jump-style navigation lands fully revealed (showAllFragments=true).
+        assert re.search(
+            r"nextSlide\(\) \{\s+this\.goTo\(this\.currentIndex \+ 1, true\);",
+            html,
+        )
+        assert re.search(
+            r"prevSlide\(\) \{\s+this\.goTo\(this\.currentIndex - 1, true\);",
+            html,
+        )
         # Left/Right (and Space/PageDown) advance through fragments then slides.
         assert re.search(
             r"case 'ArrowRight':\s+case ' ':\s+case 'PageDown':\s+"
@@ -1654,7 +1659,8 @@ class TestFragments:
         assert "this._commitSlideNumberBuffer();" in html
         assert "this.slideNumberBuffer += digit;" in html
         assert "this.slideNumberBuffer.length >= maxDigits" in html
-        assert "this.goTo(slideNumber - 1);" in html
+        # Numeric jumps land fully revealed, like all jump-style navigation.
+        assert "this.goTo(slideNumber - 1, true);" in html
         # goTo cancels any pending numeric jump so a stale digit can't fire
         # after the user navigates by click/touch/hash/picker; next()/prev()
         # cancel too, since fragment steps bypass goTo.
