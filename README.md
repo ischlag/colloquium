@@ -602,12 +602,15 @@ A **References** slide is automatically appended with only the cited works.
 
 | Key | Action |
 |-----|--------|
-| Right / Down / Space / PgDn | Next slide |
-| Left / Up / PgUp | Previous slide |
+| Right / Space / PgDn | Advance: next reveal step, then next slide |
+| Left / PgUp | Back: previous reveal step, then previous slide |
+| Down / Up | Next / previous slide, skipping reveal steps |
+| 1–9 | Type a slide number to jump to it (Enter commits early, Esc cancels) |
 | Home | First slide |
 | End | Last slide |
+| C | Copy current slide's markdown source |
 | F | Toggle fullscreen |
-| Escape | Close picker / exit fullscreen |
+| Escape | Cancel typed number / close picker / exit fullscreen |
 
 Click the slide counter to open the slide picker. Click left 1/3 of screen to go back, right 2/3 to go forward.
 

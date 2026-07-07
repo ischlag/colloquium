@@ -11,7 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
-- Update presentation navigation: left/right jump directly between slides, up/down still controls reveal steps, typed slide numbers jump to pages, and the hello deck documents the controls ([#38](https://github.com/natolambert/colloquium/pull/38))
+- Update presentation navigation: left/right step through reveal states then slides, up/down jump whole slides skipping reveals, typed slide numbers jump directly to pages, and the hello deck documents the controls ([#39](https://github.com/natolambert/colloquium/pull/39))
 
 ## [0.2.2] - 2026-06-19
 

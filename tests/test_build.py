@@ -1606,7 +1606,7 @@ class TestFragments:
         assert "fragmentStates" in html
         assert "_updateFragments" in html
 
-    def test_left_right_arrows_jump_slides_while_up_down_steps_fragments(self):
+    def test_left_right_step_fragments_while_up_down_jumps_slides(self):
         deck = Deck(title="Test")
         deck.add_slide(title="S1", content="A\n\n<!-- step -->\n\nB")
         deck.add_slide(title="S2", content="C")
@@ -1618,22 +1618,24 @@ class TestFragments:
         assert "prevSlide() {" in html
         assert "this.goTo(this.currentIndex + 1);" in html
         assert "this.goTo(this.currentIndex - 1, true);" in html
+        # Left/Right (and Space/PageDown) advance through fragments then slides.
         assert re.search(
-            r"case 'ArrowRight':\s+e\.preventDefault\(\);\s+this\.nextSlide\(\);",
-            html,
-        )
-        assert re.search(
-            r"case 'ArrowLeft':\s+e\.preventDefault\(\);\s+this\.prevSlide\(\);",
-            html,
-        )
-        assert re.search(
-            r"case 'ArrowDown':\s+case ' ':\s+case 'PageDown':\s+"
+            r"case 'ArrowRight':\s+case ' ':\s+case 'PageDown':\s+"
             r"e\.preventDefault\(\);\s+this\.next\(\);",
             html,
         )
         assert re.search(
-            r"case 'ArrowUp':\s+case 'PageUp':\s+"
+            r"case 'ArrowLeft':\s+case 'PageUp':\s+"
             r"e\.preventDefault\(\);\s+this\.prev\(\);",
+            html,
+        )
+        # Up/Down jump whole slides, skipping fragments.
+        assert re.search(
+            r"case 'ArrowDown':\s+e\.preventDefault\(\);\s+this\.nextSlide\(\);",
+            html,
+        )
+        assert re.search(
+            r"case 'ArrowUp':\s+e\.preventDefault\(\);\s+this\.prevSlide\(\);",
             html,
         )
 
@@ -1653,6 +1655,11 @@ class TestFragments:
         assert "this.slideNumberBuffer += digit;" in html
         assert "this.slideNumberBuffer.length >= maxDigits" in html
         assert "this.goTo(slideNumber - 1);" in html
+        # goTo cancels any pending numeric jump so a stale digit can't fire
+        # after the user navigates by click/touch/hash/picker; next()/prev()
+        # cancel too, since fragment steps bypass goTo.
+        assert "Cancel any pending numeric jump" in html
+        assert "Fragment steps bypass goTo" in html
 
     def test_li_with_arbitrary_attributes_gets_fragment_index(self):
         """Bullets with any attribute order must still get data-fragment-index."""

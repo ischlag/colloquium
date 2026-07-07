@@ -119,6 +119,12 @@ class ColloquiumPresentation {
     goTo(index, showAllFragments = false) {
         if (index < 0 || index >= this.totalSlides) return;
 
+        // Cancel any pending numeric jump. The numeric commit path clears the
+        // buffer before calling goTo, so this is a no-op there; every other
+        // navigation path (click, touch, hash, picker, arrows) cancels a stale
+        // digit that would otherwise fire later and snap the deck unexpectedly.
+        this._clearSlideNumberBuffer();
+
         this.slides[this.currentIndex].classList.remove('active');
         this.currentIndex = index;
         this.slides[this.currentIndex].classList.add('active');
@@ -157,6 +163,9 @@ class ColloquiumPresentation {
     }
 
     next() {
+        // Fragment steps bypass goTo, so cancel any pending numeric jump here
+        // too (click/swipe advancing a fragment must not let a stale digit fire).
+        this._clearSlideNumberBuffer();
         const fc = this.fragmentCounts[this.currentIndex];
         const fs = this.fragmentStates[this.currentIndex];
         if (fc > 0 && fs < fc) {
@@ -168,6 +177,7 @@ class ColloquiumPresentation {
     }
 
     prev() {
+        this._clearSlideNumberBuffer();
         const fs = this.fragmentStates[this.currentIndex];
         if (fs > 0) {
             this.fragmentStates[this.currentIndex] = fs - 1;
@@ -415,24 +425,28 @@ class ColloquiumPresentation {
         if (this._handleSlideNumberKey(e)) return;
 
         switch (e.key) {
+            // Left/Right (and Space/PageDown) step through fragments then
+            // slides — the familiar PowerPoint/Keynote "advance" axis.
             case 'ArrowRight':
-                e.preventDefault();
-                this.nextSlide();
-                break;
-            case 'ArrowDown':
             case ' ':
             case 'PageDown':
                 e.preventDefault();
                 this.next();
                 break;
             case 'ArrowLeft':
-                e.preventDefault();
-                this.prevSlide();
-                break;
-            case 'ArrowUp':
             case 'PageUp':
                 e.preventDefault();
                 this.prev();
+                break;
+            // Up/Down jump whole slides, skipping fragments — a fast axis for
+            // moving past fragment-heavy slides.
+            case 'ArrowDown':
+                e.preventDefault();
+                this.nextSlide();
+                break;
+            case 'ArrowUp':
+                e.preventDefault();
+                this.prevSlide();
                 break;
             case 'Home':
                 e.preventDefault();
