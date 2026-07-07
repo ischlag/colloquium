@@ -1666,6 +1666,10 @@ class TestFragments:
         # cancel too, since fragment steps bypass goTo.
         assert "Cancel any pending numeric jump" in html
         assert "Fragment steps bypass goTo" in html
+        # Opening or dismissing the picker cancels a pending digit too, so a
+        # stale timer can't close the picker mid-browse and jump away.
+        assert "Opening the picker cancels a pending numeric jump" in html
+        assert "Dismissing the picker also cancels a pending numeric jump" in html
 
     def test_li_with_arbitrary_attributes_gets_fragment_index(self):
         """Bullets with any attribute order must still get data-fragment-index."""

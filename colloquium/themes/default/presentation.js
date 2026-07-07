@@ -349,6 +349,10 @@ class ColloquiumPresentation {
     }
 
     _openPicker() {
+        // Opening the picker cancels a pending numeric jump — otherwise the
+        // stale timer fires mid-browse, closing the picker and jumping away.
+        this._clearSlideNumberBuffer();
+
         // Highlight current slide
         this.pickerItems.forEach((btn, i) => {
             btn.classList.toggle('current', i === this.currentIndex);
@@ -364,6 +368,10 @@ class ColloquiumPresentation {
     }
 
     _closePicker() {
+        // Dismissing the picker also cancels a pending numeric jump (the
+        // commit path clears its buffer before closing, so this is a no-op
+        // there).
+        this._clearSlideNumberBuffer();
         this.overlay.classList.remove('active');
         this.pickerOpen = false;
     }
