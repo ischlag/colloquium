@@ -1281,9 +1281,11 @@ _HTML_TEMPLATE = Template("""\
 <!-- highlight.js for code syntax highlighting -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css">
 <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js"></script>
+$font_link
 
 <style>
 $theme_css
+$font_css
 $custom_css
 </style>
 </head>
@@ -1495,26 +1497,34 @@ window.addEventListener("load", function() {
 """)
 
 
-def _build_font_css(fonts: dict | None) -> str:
-    """Build CSS for custom font overrides, including Google Fonts @import."""
+def _build_font_link(fonts: dict | None) -> str:
+    """Build a <link> tag to load Google Fonts."""
     if not fonts:
         return ""
-    parts = []
     imports = []
+    for key in ("heading", "body"):
+        name = fonts.get(key)
+        if name:
+            imports.append(name.replace(" ", "+"))
+    if not imports:
+        return ""
+    families = "&family=".join(f"{f}:wght@400;600;700" for f in imports)
+    return f'<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family={families}&display=swap">'
+
+
+def _build_font_css(fonts: dict | None) -> str:
+    """Build CSS custom property overrides for font families."""
+    if not fonts:
+        return ""
     overrides = []
     for key, prop in (("heading", "--colloquium-font-heading"), ("body", "--colloquium-font-body")):
         name = fonts.get(key)
         if not name:
             continue
-        # Google Fonts URL: spaces become +
-        imports.append(name.replace(" ", "+"))
         overrides.append(f'    {prop}: "{name}", sans-serif;')
-    if imports:
-        families = "&family=".join(f"{f}:wght@400;600;700" for f in imports)
-        parts.append(f'@import url("https://fonts.googleapis.com/css2?family={families}&display=swap");')
-    if overrides:
-        parts.append(":root {\n" + "\n".join(overrides) + "\n}")
-    return "\n".join(parts)
+    if not overrides:
+        return ""
+    return ":root {\n" + "\n".join(overrides) + "\n}"
 
 
 def build_deck(deck: Deck) -> str:
@@ -1524,8 +1534,9 @@ def build_deck(deck: Deck) -> str:
     theme_css = _read_theme_css(deck.theme)
     presentation_js = _read_presentation_js(deck.theme)
 
+    font_link = _build_font_link(deck.fonts)
     font_css = _build_font_css(deck.fonts)
-    custom_css = font_css + ("\n" + deck.custom_css if deck.custom_css else "")
+    custom_css = deck.custom_css or ""
 
     # Load bibliography if configured
     bib_entries = {}
@@ -1627,6 +1638,8 @@ def build_deck(deck: Deck) -> str:
 
     return _HTML_TEMPLATE.substitute(
         title=deck.title,
+        font_link=font_link,
+        font_css=font_css,
         theme_css=theme_css,
         custom_css=custom_css,
         slides_html=slides_html,

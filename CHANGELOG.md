@@ -12,6 +12,7 @@ One line per PR for easy copy into GitHub releases.
 ## [Unreleased]
 
 - Update presentation navigation: left/right step through reveal states then slides; up/down, typed slide numbers, and the picker jump straight to a slide with all reveals shown ([#39](https://github.com/natolambert/colloquium/pull/39))
+- Load Google Fonts with a `<link>` in `<head>` so custom `fonts:` from the frontmatter actually render instead of silently falling back to the theme default ([#41](https://github.com/natolambert/colloquium/pull/41))
 
 ## [0.2.2] - 2026-06-19
 
