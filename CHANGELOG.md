@@ -11,6 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Upgrade locked Pillow to 12.3.0 to fix 13 Dependabot alerts (heap OOB read/writes, decompression-bomb bypasses, DoS, command injection) ([#42](https://github.com/natolambert/colloquium/pull/42))
 - Update presentation navigation: left/right step through reveal states then slides; up/down, typed slide numbers, and the picker jump straight to a slide with all reveals shown ([#39](https://github.com/natolambert/colloquium/pull/39))
 
 ## [0.2.2] - 2026-06-19
