@@ -11,6 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Raise the PDF export virtual-time budget (5s → 30s, overridable via `COLLOQUIUM_PDF_TIME_BUDGET_MS`) so the last images in image-heavy decks stop rendering blank in exported PDFs ([#45](https://github.com/natolambert/colloquium/pull/45))
 - Apply smart typography (en/em dashes, curly quotes) inside `box` and `conversation` elements by sharing the main pipeline's markdown-it config ([#44](https://github.com/natolambert/colloquium/pull/44))
 - Fix paragraph spacing swallowed by generated step/animate fragment wrappers (stepped paragraphs rendered flush with no line break) ([#43](https://github.com/natolambert/colloquium/pull/43))
 - Upgrade locked Pillow to 12.3.0 to fix 13 Dependabot alerts (heap OOB read/writes, decompression-bomb bypasses, DoS, command injection) ([#42](https://github.com/natolambert/colloquium/pull/42))
