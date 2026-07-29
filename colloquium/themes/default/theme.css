@@ -110,6 +110,14 @@ html, body {
     margin-bottom: 0;
 }
 
+/* Step/animate reveals wrap blocks in generated fragment <div>s, which makes a
+   mid-slide paragraph :last-child of its wrapper and strips the 0.8em spacing
+   above -- visually merging it with the next fragment's paragraph. Restore the
+   margin unless the wrapper really is the last block in its container. */
+.slide div.fragment[data-fragment-index]:not(:last-child) > p:last-child {
+    margin-bottom: 0.8em;
+}
+
 .slide strong {
     font-weight: 600;
 }
