@@ -4,7 +4,8 @@ import html as html_module
 import re
 
 import yaml
-from markdown_it import MarkdownIt
+
+from colloquium.md import create_base_md
 
 PATTERN = re.compile(
     r'<pre><code class="language-conversation">(.*?)</code></pre>',
@@ -12,7 +13,7 @@ PATTERN = re.compile(
 )
 
 _conversation_counter = 0
-_inline_md = MarkdownIt("commonmark", {"html": True})
+_inline_md = create_base_md()
 
 
 def reset() -> None:

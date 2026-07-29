@@ -4,14 +4,15 @@ import html as html_module
 import re
 
 import yaml
-from markdown_it import MarkdownIt
+
+from colloquium.md import create_base_md
 
 PATTERN = re.compile(
     r'<pre><code class="language-box">(.*?)</code></pre>',
     re.DOTALL,
 )
 
-_block_md = MarkdownIt("commonmark", {"html": True})
+_block_md = create_base_md()
 _SIMPLE_SCALAR_RE = re.compile(r"^(title|tone|align|size|compact):\s*(.+?)\s*$")
 
 
