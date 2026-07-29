@@ -14,6 +14,21 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import quote
 
+# Chromium's print-to-pdf advances a virtual clock and snapshots the page when
+# the budget runs out — whether or not every slide image has finished loading.
+# 5s silently dropped the last images on image-heavy decks (blank in the PDF,
+# fine in the HTML preview), so the default is generous. Virtual time
+# fast-forwards through idle waits, so light decks don't pay for the headroom.
+_DEFAULT_PDF_TIME_BUDGET_MS = 30000
+
+
+def _pdf_time_budget_ms() -> int:
+    """PDF print budget in ms, overridable via COLLOQUIUM_PDF_TIME_BUDGET_MS."""
+    try:
+        return int(os.environ["COLLOQUIUM_PDF_TIME_BUDGET_MS"])
+    except (KeyError, ValueError):
+        return _DEFAULT_PDF_TIME_BUDGET_MS
+
 
 def _find_browser() -> str | None:
     """Find a headless-capable browser on the system."""
@@ -98,12 +113,14 @@ def _export_pdf_from_html(html_path: str, output_path: str) -> str | None:
             "--no-margins",
             f"--paper-width=10",
             f"--paper-height=5.625",
-            "--virtual-time-budget=5000",
+            f"--virtual-time-budget={_pdf_time_budget_ms()}",
             html_url,
         ]
 
         try:
-            subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+            # Wall-clock timeout must comfortably exceed the virtual-time
+            # budget: pages that genuinely need the budget spend real time too.
+            subprocess.run(cmd, capture_output=True, timeout=120, check=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
