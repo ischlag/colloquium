@@ -238,6 +238,39 @@ class TestBuildDeck:
         assert "colloquium-box-title" in html
         assert "<li>One</li>" in html
 
+    def test_box_element_applies_smart_typography(self):
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Box",
+            content=(
+                "```box\n"
+                "title: The plan\n"
+                "content: |\n"
+                "  **Basics** -- why models need \"tools\"\n"
+                "```"
+            ),
+        )
+        html = build_deck(deck)
+
+        assert "\u2013 why models need \u201ctools\u201d" in html
+
+    def test_conversation_element_applies_smart_typography(self):
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Chat",
+            content=(
+                "```conversation\n"
+                "messages:\n"
+                "  - role: user\n"
+                "    content: |\n"
+                "      A question -- with a \"quote\"\n"
+                "```"
+            ),
+        )
+        html = build_deck(deck)
+
+        assert "\u2013 with a \u201cquote\u201d" in html
+
     def test_box_element_allows_unquoted_colon_in_title(self):
         deck = Deck(title="Test")
         deck.add_slide(

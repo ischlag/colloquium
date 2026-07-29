@@ -12,6 +12,8 @@ from string import Template
 from markdown_it import MarkdownIt
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 
+from colloquium.md import create_base_md
+
 from colloquium import elements
 from colloquium.deck import Deck
 from colloquium.slide import Slide
@@ -42,8 +44,7 @@ def _create_md_renderer() -> MarkdownIt:
     processing (e.g. _ becoming <em>). KaTeX renders the resulting
     .math elements client-side.
     """
-    md = MarkdownIt("commonmark", {"html": True, "typographer": True})
-    md.enable(["table", "replacements", "smartquotes"])
+    md = create_base_md()
     dollarmath_plugin(md, double_inline=True)
     return md
 
