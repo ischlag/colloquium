@@ -1592,15 +1592,16 @@ body:hover .colloquium-present {
 
     /* Hidden slides never get the runtime figure fit pass, so printed grid
        figures need an explicit container-sized fallback. (Row figures are
-       excluded: they get the row-fraction cap below instead.) */
-    .slide .slide-content > figure.colloquium-figure:first-child:last-child,
-    .slide .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child {
+       excluded: they get the row-fraction cap below instead. img-overflow
+       slides opted into a deliberate bleed, so no print cap applies.) */
+    .slide:not(.img-overflow) .slide-content > figure.colloquium-figure:first-child:last-child,
+    .slide:not(.img-overflow) .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child {
         width: 100% !important;
         max-width: 100% !important;
     }
 
-    .slide .slide-content > figure.colloquium-figure:first-child:last-child > img,
-    .slide .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child > img {
+    .slide:not(.img-overflow) .slide-content > figure.colloquium-figure:first-child:last-child > img,
+    .slide:not(.img-overflow) .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child > img {
         width: 100% !important;
         height: auto !important;
         max-width: 100% !important;
@@ -1613,7 +1614,7 @@ body:hover .colloquium-present {
        print fragmentation then silently moves the whole image onto the next
        PDF page. --colloquium-print-row-frac is emitted on each row at build
        time; 96px approximates the title block. */
-    .slide .colloquium-row img {
+    .slide:not(.img-overflow) .colloquium-row img {
         width: auto !important;
         height: auto !important;
         max-width: 100% !important;
@@ -1624,7 +1625,7 @@ body:hover .colloquium-present {
     }
 
     /* Leave room for the caption under captioned row figures. */
-    .slide .colloquium-row figure.colloquium-figure:has(> figcaption) > img {
+    .slide:not(.img-overflow) .colloquium-row figure.colloquium-figure:has(> figcaption) > img {
         max-height: calc(
             (720px - var(--colloquium-slide-padding) * 2 - 96px)
             * var(--colloquium-print-row-frac, 1) - 48px
