@@ -1,5 +1,6 @@
 """Tests for the HTML builder."""
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -466,6 +467,59 @@ class TestBuildDeck:
         html = build_deck(deck)
 
         assert 'grid-template-rows: minmax(0, 25fr) minmax(0, 75fr);' in html
+
+    def test_rows_emit_print_row_fractions(self):
+        """Each row carries its height share for the print image-size cap."""
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Rows",
+            content="Top\n\n===\n\nBottom",
+            classes=["rows-40-60"],
+        )
+        html = build_deck(deck)
+
+        assert 'style="--colloquium-print-row-frac: 0.4000;"' in html
+        assert 'style="--colloquium-print-row-frac: 0.6000;"' in html
+
+    def test_rows_count_spec_emits_equal_print_fractions(self):
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Rows",
+            content="Top\n\n===\n\nBottom",
+            classes=["rows-2"],
+        )
+        html = build_deck(deck)
+
+        assert html.count('--colloquium-print-row-frac: 0.5000;') == 2
+
+    def test_rows_mismatched_spec_falls_back_to_equal_fractions(self):
+        """A spec that doesn't match the row count splits evenly instead."""
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Rows",
+            content="One\n\n===\n\nTwo\n\n===\n\nThree",
+            classes=["rows-40-60"],
+        )
+        html = build_deck(deck)
+
+        assert html.count('--colloquium-print-row-frac: 0.3333;') == 3
+
+    def test_rows_nested_columns_keep_print_fraction_and_grid(self):
+        """The row-frac var must coexist with a nested column grid template."""
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Rows",
+            content="<!-- row-columns: 40/60 -->\nLeft\n\n|||\n\nRight\n\n===\n\nBottom",
+            classes=["rows-35-65"],
+        )
+        html = build_deck(deck)
+
+        assert re.search(
+            r'class="colloquium-row cols-40-60 colloquium-grid" '
+            r'style="--colloquium-print-row-frac: 0\.3500; '
+            r'grid-template-columns: minmax\(0, 40fr\) minmax\(0, 60fr\);"',
+            html,
+        )
 
     def test_no_columns_preserves_hr(self):
         deck = Deck(title="Test")
@@ -1790,7 +1844,7 @@ class TestFragments:
         deck.slides.append(slide)
         html = build_deck(deck)
         assert 'data-fragment-count="4"' in html
-        assert '<div class="colloquium-row"><div class="fragment"' in html
+        assert re.search(r'<div class="colloquium-row" style="[^"]*"><div class="fragment"', html)
 
     def test_blocks_wraps_markdown_headings(self):
         """Blocks mode must treat markdown headings as top-level fragments."""
@@ -1918,11 +1972,12 @@ class TestFragments:
         deck.slides.append(slide)
         html = build_deck(deck)
         assert 'data-fragment-count="1"' in html
-        assert (
-            '<div class="colloquium-row"><p>Top</p>\n'
-            '<div class="fragment" data-fragment-index="1"><p>Top step</p></div>'
-            '</div><div class="colloquium-row"><p>Bottom</p>\n</div>'
-        ) in html
+        assert re.search(
+            r'<div class="colloquium-row" style="[^"]*"><p>Top</p>\n'
+            r'<div class="fragment" data-fragment-index="1"><p>Top step</p></div>'
+            r'</div><div class="colloquium-row" style="[^"]*"><p>Bottom</p>\n</div>',
+            html,
+        )
 
     def test_step_blockquote_with_nested_bullets(self):
         """Step group with a blockquote containing fragments must wrap the blockquote."""

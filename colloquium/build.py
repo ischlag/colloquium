@@ -1095,22 +1095,48 @@ def _write_text_atomic(output_path: str, text: str) -> None:
     tmp_path.replace(output)
 
 
+def _row_print_fractions(rows_spec: str | None, row_count: int) -> list[float]:
+    """Height fraction of each row, for the print-time image size cap.
+
+    Printed slides never run the runtime figure fit pass, so the theme's print
+    CSS caps row images at (usable slide height x row fraction) via the
+    --colloquium-print-row-frac variable emitted here. Without the cap, a row
+    image taller than its row overflows the fixed-height slide and Chromium's
+    print fragmentation moves it to the next PDF page.
+    """
+    if row_count <= 0:
+        return []
+    if rows_spec:
+        parts = [p for p in rows_spec.split("-") if p]
+        if rows_spec.isdigit():
+            parts = ["1"] * int(rows_spec)
+        if (
+            len(parts) == row_count
+            and all(p.isdigit() for p in parts)
+            and any(int(p) > 0 for p in parts)
+        ):
+            total = sum(int(p) for p in parts)
+            return [int(p) / total for p in parts]
+    return [1 / row_count] * row_count
+
+
 def _build_rows_html(
     content: str, md: MarkdownIt, figure_captions: bool = False,
-    animate_type: str | None = None,
+    animate_type: str | None = None, rows_spec: str | None = None,
 ) -> str:
     """Build a row-based slide body with optional nested columns in each row."""
     frag_animate = animate_type if animate_type in ("bullets", "items") else None
     row_blocks = [block.strip() for block in _ROW_SPLIT_RE.split(content) if block.strip()]
+    row_fractions = _row_print_fractions(rows_spec, len(row_blocks))
     rows_html = []
-    for block in row_blocks:
+    for row_index, block in enumerate(row_blocks):
         row_classes = ["colloquium-row"]
-        row_style = ""
+        row_style = f"--colloquium-print-row-frac: {row_fractions[row_index]:.4f};"
         for match in _ROW_COLUMNS_RE.finditer(block):
             spec = match.group(1).strip()
             row_classes.append(f'cols-{spec.replace("/", "-")}')
             row_classes.append("colloquium-grid")
-            row_style = _grid_template_style(spec.replace("/", "-"), "columns")
+            row_style += " " + _grid_template_style(spec.replace("/", "-"), "columns")
             block = block.replace(match.group(0), "")
 
         rendered = _render_markdown(block.strip(), md)
@@ -1185,12 +1211,12 @@ def _build_slide_html(
     if slide_content:
         figure_captions = _slide_uses_figure_captions(slide.classes, deck_figure_captions)
         if has_rows:
+            rows_spec = _extract_grid_spec(slide.classes, "rows-")
             rendered = _build_rows_html(
                 slide_content, md, figure_captions=figure_captions,
-                animate_type=animate_type,
+                animate_type=animate_type, rows_spec=rows_spec,
             )
             rendered, fragment_count = _number_fragments(rendered)
-            rows_spec = _extract_grid_spec(slide.classes, "rows-")
             rows_style = _grid_template_style(rows_spec or "", "rows")
             content_style_attr = f' style="{rows_style}"' if rows_style else ""
             parts.append(f'<div class="slide-content colloquium-rows"{content_style_attr}>{rendered}</div>')

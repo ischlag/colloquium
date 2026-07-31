@@ -1590,22 +1590,46 @@ body:hover .colloquium-present {
         overflow: visible !important;
     }
 
-    /* Hidden slides never get the runtime figure fit pass, so printed grid/row
-       figures need an explicit container-sized fallback. */
-    .slide .slide-content > figure.colloquium-figure:first-child:last-child,
-    .slide .colloquium-grid > .col > figure.colloquium-figure:first-child:last-child,
-    .slide .colloquium-row > figure.colloquium-figure:first-child:last-child {
+    /* Hidden slides never get the runtime figure fit pass, so printed grid
+       figures need an explicit container-sized fallback. (Row figures are
+       excluded: they get the row-fraction cap below instead. img-overflow
+       slides opted into a deliberate bleed, so no print cap applies.) */
+    .slide:not(.img-overflow) .slide-content > figure.colloquium-figure:first-child:last-child,
+    .slide:not(.img-overflow) .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child {
         width: 100% !important;
         max-width: 100% !important;
     }
 
-    .slide .slide-content > figure.colloquium-figure:first-child:last-child > img,
-    .slide .colloquium-grid > .col > figure.colloquium-figure:first-child:last-child > img,
-    .slide .colloquium-row > figure.colloquium-figure:first-child:last-child > img {
+    .slide:not(.img-overflow) .slide-content > figure.colloquium-figure:first-child:last-child > img,
+    .slide:not(.img-overflow) .slide-content.colloquium-grid > .col > figure.colloquium-figure:first-child:last-child > img {
         width: 100% !important;
         height: auto !important;
         max-width: 100% !important;
         max-height: calc(720px - var(--colloquium-slide-padding) * 2 - 100px) !important;
+    }
+
+    /* Row images: cap to the row's height share of the slide. On screen the
+       runtime fit pass sizes these, but printed slides never run it, and an
+       image taller than its row overflows the fixed-height slide -- Chromium's
+       print fragmentation then silently moves the whole image onto the next
+       PDF page. --colloquium-print-row-frac is emitted on each row at build
+       time; 96px approximates the title block. */
+    .slide:not(.img-overflow) .colloquium-row img {
+        width: auto !important;
+        height: auto !important;
+        max-width: 100% !important;
+        max-height: calc(
+            (720px - var(--colloquium-slide-padding) * 2 - 96px)
+            * var(--colloquium-print-row-frac, 1)
+        ) !important;
+    }
+
+    /* Leave room for the caption under captioned row figures. */
+    .slide:not(.img-overflow) .colloquium-row figure.colloquium-figure:has(> figcaption) > img {
+        max-height: calc(
+            (720px - var(--colloquium-slide-padding) * 2 - 96px)
+            * var(--colloquium-print-row-frac, 1) - 48px
+        ) !important;
     }
 
     /* Printed slides are not .active, so re-apply layout/utility rules without that gate. */
