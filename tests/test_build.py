@@ -492,6 +492,18 @@ class TestBuildDeck:
 
         assert html.count('--colloquium-print-row-frac: 0.5000;') == 2
 
+    def test_rows_huge_count_spec_does_not_allocate(self):
+        """An absurd count spec must not materialize a count-sized list."""
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Rows",
+            content="Top\n\n===\n\nBottom",
+            classes=["rows-100000000"],
+        )
+        html = build_deck(deck)
+
+        assert html.count('--colloquium-print-row-frac: 0.5000;') == 2
+
     def test_rows_mismatched_spec_falls_back_to_equal_fractions(self):
         """A spec that doesn't match the row count splits evenly instead."""
         deck = Deck(title="Test")

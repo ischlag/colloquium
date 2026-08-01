@@ -1107,9 +1107,13 @@ def _row_print_fractions(rows_spec: str | None, row_count: int) -> list[float]:
     if row_count <= 0:
         return []
     if rows_spec:
-        parts = [p for p in rows_spec.split("-") if p]
+        # A pure count spec means equal rows whether or not it matches the
+        # actual row blocks, so return directly instead of materializing a
+        # count-sized list -- a spec like `rows: 100000000` would otherwise
+        # exhaust memory.
         if rows_spec.isdigit():
-            parts = ["1"] * int(rows_spec)
+            return [1 / row_count] * row_count
+        parts = [p for p in rows_spec.split("-") if p]
         if (
             len(parts) == row_count
             and all(p.isdigit() for p in parts)
