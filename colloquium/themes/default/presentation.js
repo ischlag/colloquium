@@ -9,6 +9,12 @@ class ColloquiumPresentation {
         this.slides = Array.from(document.querySelectorAll('.slide'));
         this.currentIndex = 0;
         this.totalSlides = this.slides.length;
+        // Progress bar completes at the last main slide; references and
+        // appendix slides keep it at 100%.
+        const backmatter = this.slides.findIndex(s =>
+            s.classList.contains('slide--references') ||
+            s.classList.contains('slide--appendix'));
+        this.mainTotal = backmatter === -1 ? this.totalSlides : backmatter;
         this._iframeKeyboardRelayDocuments = new WeakSet();
         this.slideNumberBuffer = '';
         this.slideNumberTimer = null;
@@ -37,6 +43,24 @@ class ColloquiumPresentation {
 
         this.deck.setAttribute('tabindex', '-1');
         this.progressBar = document.querySelector('.colloquium-progress-bar');
+        // One clickable dot per main slide instead of a continuous bar
+        this.progressDots = null;
+        const progressWrap = document.querySelector('.colloquium-progress');
+        this.progressWrap = progressWrap;
+        if (progressWrap) {
+            progressWrap.classList.add('colloquium-progress--dots');
+            progressWrap.innerHTML = '';
+            this.progressDots = [];
+            for (let i = 0; i < this.totalSlides; i++) {
+                const dot = document.createElement('span');
+                dot.className = 'colloquium-progress-dot';
+                if (i >= this.mainTotal) dot.classList.add('backmatter');
+                dot.addEventListener('click', () => this.goTo(i, true));
+                progressWrap.appendChild(dot);
+                this.progressDots.push(dot);
+            }
+            this.progressBar = null;
+        }
         this.pickerTrigger = document.querySelector('.colloquium-picker-trigger');
         this.pickerTriggerCount = this.pickerTrigger
             ? this.pickerTrigger.querySelector('.colloquium-picker-trigger-count')
@@ -97,6 +121,20 @@ class ColloquiumPresentation {
      * Scale the 1280x720 deck to fit the viewport while maintaining 16:9 aspect ratio.
      * Centers the deck with black letterbox/pillarbox bars.
      */
+    _updateProgressPalette() {
+        // Light dot palette when the current slide is dark (section break) or
+        // when letterboxing puts the dot row on the black bars (fullscreen on
+        // non-16:9 screens).
+        if (!this.progressWrap || !this.progressDots) return;
+        const slide = this.slides[this.currentIndex];
+        const scale = Math.min(
+            window.innerWidth / this.width, window.innerHeight / this.height);
+        const letterboxTop = (window.innerHeight - this.height * scale) / 2;
+        const onDark = letterboxTop >= 22 ||
+            (slide && slide.classList.contains('slide--section-break'));
+        this.progressWrap.classList.toggle('colloquium-progress--on-dark', onDark);
+    }
+
     _scaleDeck() {
         const vw = window.innerWidth;
         const vh = window.innerHeight;
@@ -108,6 +146,9 @@ class ColloquiumPresentation {
         const offsetY = (vh - scaledH) / 2;
 
         this.deck.style.transform = `translate(${offsetX}px, ${offsetY}px) scale(${scale})`;
+
+        // Letterboxing puts the dot row on the black bars
+        this._updateProgressPalette();
 
         if (window.colloquiumFitCaptionedFiguresIn) {
             requestAnimationFrame(() => {
@@ -151,10 +192,22 @@ class ColloquiumPresentation {
         // Update hash
         history.replaceState(null, '', '#' + (this.currentIndex + 1));
 
-        // Update progress bar
-        if (this.progressBar) {
-            const progress = this.totalSlides > 1
-                ? (this.currentIndex / (this.totalSlides - 1)) * 100
+        // Update progress dots (falls back to the continuous bar).
+        // Backmatter dots (references/appendix) only appear once reached;
+        // the main dots stay fully "done" while presenting backmatter.
+        if (this.progressDots) {
+            this._updateProgressPalette();
+            const inBackmatter = this.currentIndex >= this.mainTotal;
+            this.progressDots.forEach((dot, i) => {
+                if (i >= this.mainTotal) {
+                    dot.classList.toggle('visible', inBackmatter);
+                }
+                dot.classList.toggle('done', i < this.currentIndex);
+                dot.classList.toggle('current', i === this.currentIndex);
+            });
+        } else if (this.progressBar) {
+            const progress = this.mainTotal > 1
+                ? Math.min(1, this.currentIndex / (this.mainTotal - 1)) * 100
                 : 100;
             this.progressBar.style.width = progress + '%';
         }
@@ -564,7 +617,7 @@ class ColloquiumPresentation {
             }
 
             // Ignore clicks on links, interactive elements, footer, and picker
-            if (e.target.closest('a, button, input, textarea, select, .colloquium-footer, .colloquium-picker-overlay, .colloquium-present, .colloquium-picker-trigger')) return;
+            if (e.target.closest('a, button, input, textarea, select, .colloquium-footer, .colloquium-picker-overlay, .colloquium-present, .colloquium-picker-trigger, .colloquium-progress')) return;
 
             // Don't navigate if the user is highlighting/copying text. A drag
             // (pointer moved between down and up) or a live text selection both

@@ -778,7 +778,7 @@ def _build_references_slides_html(
             f'{_build_footer_html(footer, slide_index, total)}'
         )
 
-        classes = "slide slide--content"
+        classes = "slide slide--content slide--references"
         slides.append(
             f'<section class="{classes}" data-index="{slide_index}">\n{content}\n</section>'
         )
@@ -787,6 +787,32 @@ def _build_references_slides_html(
 
 
 _IMAGE_URL_RE = re.compile(r"\.(png|jpg|jpeg|gif|svg|webp)$|^https?://", re.IGNORECASE)
+
+
+_OUTLINE_BLOCK_RE = re.compile(r"```outline\s*\n?.*?```", re.DOTALL)
+
+
+def _build_outline_markdown(main_slides: list) -> str:
+    """Auto-generate outline entries from section-break slides.
+
+    Each entry links to its slide via a #n deep link, numbered in order
+    of appearance. Used to replace ```outline fenced blocks.
+    """
+    entries = []
+    for pos, slide in enumerate(main_slides, start=1):
+        if slide.layout == "section-break" and slide.title:
+            entries.append(f"{len(entries) + 1}. [{slide.title}](#{pos})")
+    return "\n".join(entries)
+
+
+_FOOTER_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+
+
+def _render_footer_links(text: str) -> str:
+    """Convert markdown-style [text](url) links in footer zones to anchors."""
+    return _FOOTER_LINK_RE.sub(
+        r'<a href="\2" target="_blank" rel="noopener">\1</a>', text
+    )
 
 
 def _build_footer_html(footer: dict | None, index: int, total: int) -> str:
@@ -818,12 +844,13 @@ def _build_footer_html(footer: dict | None, index: int, total: int) -> str:
             inner = counter_html
         elif value and ("{n}" in value or "{N}" in value):
             text = value.replace("{n}", str(index + 1)).replace("{N}", str(total))
-            inner = f'<span class="colloquium-counter">{text}</span>'
-        elif value and _IMAGE_URL_RE.search(value):
+            inner = f'<span class="colloquium-counter">{_render_footer_links(text)}</span>'
+        elif value and _IMAGE_URL_RE.search(value) and not _FOOTER_LINK_RE.search(value):
             inner = f'<img class="colloquium-footer-logo" src="{value}" alt="" style="height: {logo_height}px">'
         elif value:
             # Substitute {n} (slide number) and {N} (total slides)
             rendered = value.replace("{n}", str(index + 1)).replace("{N}", str(total))
+            rendered = _render_footer_links(rendered)
             if "{n}" in value or "{N}" in value:
                 inner = f'<span class="colloquium-counter">{rendered}</span>'
             else:
@@ -1325,7 +1352,7 @@ $custom_css
 $slides_html
 </div>
 
-<button class="colloquium-present" title="Present (F)">&#9654;</button>
+<button class="colloquium-present" title="Fullscreen (F)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></button>
 
 <button class="colloquium-picker-trigger" title="Open slide picker">
     <span class="colloquium-picker-trigger-label">Slides</span>
@@ -1588,6 +1615,12 @@ def build_deck(deck: Deck) -> str:
     ]
     render_order_slides = main_slides + post_reference_slides
 
+    # Expand ```outline blocks into an auto-generated section index
+    outline_md = _build_outline_markdown(main_slides)
+    for slide in render_order_slides:
+        if slide.content and _OUTLINE_BLOCK_RE.search(slide.content):
+            slide.content = _OUTLINE_BLOCK_RE.sub(lambda _: outline_md, slide.content)
+
     # First pass: build slides and discover cited keys
     cited_keys: list[str] = []
     total = len(main_slides)
@@ -1663,6 +1696,10 @@ def build_deck(deck: Deck) -> str:
             slide_html = _process_citations(
                 slide_html, bib_entries, citation_style, cited_keys, citation_order, citation_numbers,
             )
+        # Mark appendix slides so the progress indicator can exclude them
+        slide_html = slide_html.replace(
+            '<section class="slide ', '<section class="slide slide--appendix ', 1
+        )
         slides_html_parts.append(slide_html)
 
     slides_html = "\n\n".join(slides_html_parts)

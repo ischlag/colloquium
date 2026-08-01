@@ -13,3 +13,7 @@ examples/**/*.pdf
 # IDE
 .idea/
 .vscode/
+
+# Root demo deck build artifacts
+/demo.html
+/slides/
