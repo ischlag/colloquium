@@ -11,6 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Fix a purely numeric `rows` count spec (e.g. a typo'd `rows: 100000000`) allocating a count-sized list and potentially exhausting memory during builds ([#47](https://github.com/natolambert/colloquium/pull/47))
 - Cap printed row images at their row's height share (emitted as `--colloquium-print-row-frac`) so tall figures in `rows` slides stop overflowing the page and silently shifting onto the next PDF page during export ([#46](https://github.com/natolambert/colloquium/pull/46))
 - Raise the PDF export virtual-time budget (5s → 30s, overridable via `COLLOQUIUM_PDF_TIME_BUDGET_MS`) so the last images in image-heavy decks stop rendering blank in exported PDFs ([#45](https://github.com/natolambert/colloquium/pull/45))
 - Apply smart typography (en/em dashes, curly quotes) inside `box` and `conversation` elements by sharing the main pipeline's markdown-it config ([#44](https://github.com/natolambert/colloquium/pull/44))
