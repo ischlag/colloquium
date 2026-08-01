@@ -1,3 +1,21 @@
+# Colloquium (fork)
+
+This is a fork of [Nathan Lambert's colloquium](https://github.com/natolambert/colloquium), a markdown-native slide tool for research talks, adapted for my own lectures and talks.
+
+## Differences from upstream
+
+- **Dot progress indicator**: one clickable dot per content slide replaces the continuous progress bar, so the number of slides left is countable at a glance. References and appendix slides get separate gray dots that only appear once reached, with their space reserved so the main dots never shift.
+- **Adaptive dot palette**: dots switch to a light palette on dark section-break slides and whenever fullscreen letterboxing puts the dot row on the black bars.
+- **Auto-generated outline**: a fenced ` ```outline ` block expands at build time into a numbered, clickable index of all section-break slides with `#n` deep links.
+- **Footer links**: footer zones render markdown `[text](url)` links as anchors (e.g. the author name linking to a homepage).
+- **True-center footer**: the footer is a `1fr auto 1fr` grid, so the center zone stays page-centered regardless of the side zones' widths.
+- **Fullscreen icon**: the present button shows a four-corner fullscreen icon instead of a play triangle.
+- [`demo.md`](demo.md) at the repo root exercises every feature; build it with `colloquium build demo.md`.
+
+Everything below is the upstream README.
+
+---
+
 # Colloquium
 
 Markdown-based slide creation tool for research talks. Git-friendly, AI-drivable, single-file HTML output.
