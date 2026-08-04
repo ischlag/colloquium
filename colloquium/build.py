@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html as html_module
 import re
+import sys
 import tempfile
 from pathlib import Path
 from string import Template
@@ -401,12 +402,30 @@ _CITATION_RE = re.compile(r'\[@([\w:.\-]+(?:\s*;\s*@[\w:.\-]+)*)\]')
 
 
 def _parse_bib_file(path: str) -> dict:
-    """Parse a .bib file using pybtex. Returns dict of key -> entry."""
+    """Parse a .bib file using pybtex. Returns dict of key -> entry.
+
+    Failures are non-fatal (the deck still builds) but must be loud: a
+    single malformed entry makes pybtex raise, and silently returning {}
+    leaves every citation in the deck unresolved with no hint why.
+    """
     try:
         from pybtex.database import parse_file as pybtex_parse
+    except ImportError:
+        print(
+            f"Warning: pybtex is not installed; skipping bibliography {path!r} "
+            "(citations will not resolve)",
+            file=sys.stderr,
+        )
+        return {}
+    try:
         bib = pybtex_parse(path, bib_format="bibtex")
         return dict(bib.entries)
-    except Exception:
+    except Exception as exc:
+        print(
+            f"Warning: failed to parse bibliography {path!r}: {exc} "
+            "-- citations will not resolve",
+            file=sys.stderr,
+        )
         return {}
 
 

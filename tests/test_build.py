@@ -927,6 +927,24 @@ class TestCitationRendering:
             assert "colloquium-cite" in result
             assert "smith2024" in cited_keys
 
+    def test_malformed_bib_warns_and_returns_empty(self, capsys):
+        """A broken entry must not silently disable every citation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = Path(tmpdir) / "refs.bib"
+            bib_path.write_text(
+                "@article{broken2024,\n  title={Missing closing brace}\n"
+                "@article{next2024,\n  title={Next},\n  year={2024}\n}\n"
+            )
+            assert _parse_bib_file(str(bib_path)) == {}
+            err = capsys.readouterr().err
+            assert "Warning: failed to parse bibliography" in err
+            assert "refs.bib" in err
+            assert "citations will not resolve" in err
+
+    def test_missing_bib_file_warns_and_returns_empty(self, capsys):
+        assert _parse_bib_file("/nonexistent/refs.bib") == {}
+        assert "Warning: failed to parse bibliography" in capsys.readouterr().err
+
     def test_numeric_style(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             bib_path = self._make_bib(tmpdir)
