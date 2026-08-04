@@ -11,6 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-08-03
+
 - Warn on stderr when a bibliography fails to parse (or pybtex is missing) instead of silently rendering every citation unresolved ([#48](https://github.com/natolambert/colloquium/pull/48))
 - Fix a purely numeric `rows` count spec (e.g. a typo'd `rows: 100000000`) allocating a count-sized list and potentially exhausting memory during builds ([#47](https://github.com/natolambert/colloquium/pull/47))
 - Cap printed row images at their row's height share (emitted as `--colloquium-print-row-frac`) so tall figures in `rows` slides stop overflowing the page and silently shifting onto the next PDF page during export ([#46](https://github.com/natolambert/colloquium/pull/46))
