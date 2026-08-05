@@ -14,6 +14,9 @@ def test_iframe_renders_with_required_src():
     assert 'loading="eager"' in out  # default
     assert 'allowfullscreen' in out
     assert 'data-colloquium-preserve-keyboard="true"' in out
+    assert 'class="colloquium-iframe-print-fallback"' in out
+    assert 'class="colloquium-iframe-print-title">Interactive content</strong>' in out
+    assert 'class="colloquium-iframe-print-link" href="https://example.com/embed.html">example.com</a>' in out
 
 
 def test_iframe_renders_optional_fields():
@@ -36,6 +39,7 @@ def test_iframe_renders_optional_fields():
     assert 'loading="lazy"' in out
     assert 'allowfullscreen' not in out
     assert 'data-colloquium-preserve-keyboard="false"' in out
+    assert 'class="colloquium-iframe-print-title">Demo Frame</strong>' in out
 
 
 def test_iframe_invalid_yaml():
@@ -70,6 +74,14 @@ def test_iframe_sanitizes_src_and_title():
     )
     assert 'src="https://example.com/?q=&quot;x&quot;&amp;k=&lt;tag&gt;"' in out
     assert 'title="&lt;unsafe&gt;"' in out
+    assert 'class="colloquium-iframe-print-title">&lt;unsafe&gt;</strong>' in out
+    assert 'href="https://example.com/?q=&quot;x&quot;&amp;k=&lt;tag&gt;"' in out
+
+
+def test_iframe_print_fallback_labels_relative_sources():
+    out = _render_iframe_block("src: demos/live.html\ntitle: Local demo")
+    assert 'class="colloquium-iframe-print-title">Local demo</strong>' in out
+    assert '>Open interactive content</a>' in out
 
 
 def test_iframe_height_falls_back_to_default_for_invalid_values():

@@ -208,6 +208,12 @@ html, body {
     max-width: 100%;
 }
 
+/* Remote iframe contents are interactive on screen but unreliable in browser
+   print output. The deterministic fallback is enabled only by print styles. */
+.colloquium-iframe-print-fallback {
+    display: none;
+}
+
 .align-center .slide-content > .colloquium-iframe-container {
     margin-left: auto;
     margin-right: auto;
@@ -1710,6 +1716,51 @@ body:hover .colloquium-present {
     a {
         color: inherit !important;
         text-decoration: underline;
+    }
+
+    /* Never ask Chromium to snapshot a remote frame into the PDF. Depending on
+       the site's headers and load timing, that produces a blank or partial
+       frame. Preserve the live iframe in HTML and print a stable linked card. */
+    .colloquium-iframe {
+        display: none !important;
+    }
+
+    .colloquium-iframe-print-fallback {
+        display: flex !important;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        width: 100%;
+        min-height: inherit;
+        padding: 1.2em 1.35em;
+        border: 2px solid var(--colloquium-border);
+        border-left: 8px solid var(--colloquium-accent);
+        border-radius: 10px;
+        background: var(--colloquium-bg);
+        text-align: left;
+    }
+
+    .colloquium-iframe-print-label {
+        margin-bottom: 0.35em;
+        color: var(--colloquium-muted);
+        font-size: 0.65em;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .colloquium-iframe-print-title {
+        margin-bottom: 0.55em;
+        color: var(--colloquium-heading);
+        font-family: var(--colloquium-font-heading);
+        font-size: 1.15em;
+        line-height: 1.25;
+    }
+
+    .slide a.colloquium-iframe-print-link {
+        color: var(--colloquium-link) !important;
+        font-size: 0.8em;
+        overflow-wrap: anywhere;
     }
 
     .slide a.colloquium-cite,
