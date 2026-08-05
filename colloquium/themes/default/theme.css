@@ -1732,6 +1732,20 @@ body:hover .colloquium-present {
     .size-normal { font-size: 24px; }
     .size-large { font-size: 28px; }
 
+    /* img-tall-right: keep the full-height figure layout in print; the
+       generic grid-figure fallback above would otherwise force height auto
+       and a capped max-height. */
+    .slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child {
+        width: 55% !important;
+        max-width: 55% !important;
+    }
+    .slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > img {
+        width: 100% !important;
+        height: calc(100% - 1.5em) !important;
+        max-width: none !important;
+        max-height: none !important;
+    }
+
     .colloquium-progress,
     .colloquium-picker-overlay,
     .colloquium-present,
