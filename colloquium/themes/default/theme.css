@@ -716,6 +716,43 @@ html, body {
 }
 
 /* ===== Utility: Vertical Alignment ===== */
+/* ===== Utility: Tall right figure =====
+   Opt-in slide class (<!-- class: img-tall-right -->) for columns slides:
+   the right column's captioned figure escapes the grid and runs from the
+   top of the slide to the bottom of the content area, caption pinned
+   beneath. The caption-fit pass skips absolutely positioned figures, so
+   these rules own the layout. */
+.slide.img-tall-right { position: relative; }
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child {
+    position: absolute;
+    top: 10px;
+    bottom: 42px;
+    right: 30px;
+    width: 55%;
+    height: auto;
+    max-height: none;
+    margin: 0;
+    display: block;
+}
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(100% - 1.5em);
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+}
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > figcaption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+}
+
 .valign-top.active { justify-content: flex-start; }
 .valign-center.active { justify-content: center; }
 .valign-bottom.active { justify-content: flex-end; }

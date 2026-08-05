@@ -2022,3 +2022,23 @@ class TestFragments:
         # blockquote (frag 1) wraps the <p> and bullets (frags 2, 3)
         assert 'data-fragment-count="3"' in html
         assert '<div class="fragment" data-fragment-index="1"><blockquote>' in html
+
+
+class TestImgTallRightUtility:
+    def test_theme_ships_img_tall_right_rules(self):
+        import pathlib
+        css = (pathlib.Path("colloquium/themes/default/theme.css")).read_text()
+        assert ".slide.img-tall-right" in css
+        assert "figure.colloquium-figure:first-child:last-child > figcaption" in css
+
+    def test_class_directive_reaches_slide_markup(self, tmp_path):
+        src = tmp_path / "deck.md"
+        src.write_text(
+            "---\ntitle: t\n---\n\n"
+            "<!-- columns: 45/55 -->\n<!-- class: img-tall-right -->\n## S\n\nText\n\n|||\n\n"
+            "![cap](x.png)\n"
+        )
+        out = tmp_path / "deck.html"
+        build_file(str(src), str(out))
+        html = out.read_text()
+        assert "img-tall-right" in html
