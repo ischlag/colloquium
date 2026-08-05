@@ -11,6 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
+- Print/PDF export renders iframe embeds as stable linked cards (title + hostname link) instead of asking Chromium to snapshot remote frames, which produced blank or partial captures; live HTML iframes are unchanged ([#51](https://github.com/natolambert/colloquium/pull/51))
+
 ## [0.2.3] - 2026-08-03
 
 - Warn on stderr when a bibliography fails to parse (or pybtex is missing) instead of silently rendering every citation unresolved ([#48](https://github.com/natolambert/colloquium/pull/48))
