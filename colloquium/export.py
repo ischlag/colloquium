@@ -337,7 +337,17 @@ def capture_slides(
 
 
 def _compress_pdf(pdf_path: str) -> None:
-    """Compress PDF with ghostscript if available."""
+    """Compress PDF with ghostscript, only when explicitly requested.
+
+    Opt-in via COLLOQUIUM_PDF_COMPRESS=1. Ghostscript 10.x rewrites the
+    ICC color profiles in Chromium's PDFs into zero-length streams that
+    Apple's PDF renderer (Preview, Quicklook, Safari) rejects — images
+    silently disappear there while poppler-based viewers still render
+    them. Correct output beats smaller output, so compression is off by
+    default.
+    """
+    if os.environ.get("COLLOQUIUM_PDF_COMPRESS") != "1":
+        return
     gs = shutil.which("gs")
     if not gs:
         return
