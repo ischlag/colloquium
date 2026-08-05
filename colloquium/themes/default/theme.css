@@ -1772,6 +1772,12 @@ body:hover .colloquium-present {
         text-decoration: underline;
     }
 
+    /* Content links keep their screen color in print so readers can see
+       which text is a URL; chrome/footer links stay muted via inherit. */
+    .slide a {
+        color: var(--colloquium-link) !important;
+    }
+
     /* Never ask Chromium to snapshot a remote frame into the PDF. Depending on
        the site's headers and load timing, that produces a blank or partial
        frame. Preserve the live iframe in HTML and print a stable linked card. */
