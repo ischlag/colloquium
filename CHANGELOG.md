@@ -11,8 +11,8 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
-- Fix captioned-figure fitting scaling images to the full cell height so the caption overflowed onto the footer: the fit pass now reserves the caption's height, and skips absolutely positioned figures so author CSS can own layout. Captioned solo figures render slightly smaller (image + caption now fit the cell together) ([#50](https://github.com/natolambert/colloquium/pull/50))
-- Add opt-in `img-tall-right` slide class: on a columns slide, the right column's captioned figure runs from the slide top to the content bottom with the caption pinned beneath ([#50](https://github.com/natolambert/colloquium/pull/50))
+- Overhaul PDF export fidelity: iframe embeds print as real page screenshots captured at export time (compact linked card as offline fallback), slide links keep their screen color, and ghostscript compression is off by default (`COLLOQUIUM_PDF_COMPRESS=1` to opt in) since gs 10.x breaks ICC profiles and blanks images in Apple's PDF viewers ([#51](https://github.com/natolambert/colloquium/pull/51))
+- Fix captioned-figure fitting overflowing captions onto the footer (reserve caption height, skip absolutely positioned figures) and add the opt-in `img-tall-right` class for full-slide-height right-column figures ([#50](https://github.com/natolambert/colloquium/pull/50))
 
 ## [0.2.3] - 2026-08-03
 

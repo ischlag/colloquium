@@ -208,6 +208,15 @@ html, body {
     max-width: 100%;
 }
 
+/* Remote iframe contents are interactive on screen but unreliable in browser
+   print output. Export captures real page snapshots for print; the linked
+   card is a fallback when a snapshot could not be captured. Both are
+   print-only. */
+.colloquium-iframe-print-fallback,
+.colloquium-iframe-print-snapshot {
+    display: none;
+}
+
 .align-center .slide-content > .colloquium-iframe-container {
     margin-left: auto;
     margin-right: auto;
@@ -1761,6 +1770,67 @@ body:hover .colloquium-present {
     a {
         color: inherit !important;
         text-decoration: underline;
+    }
+
+    /* Content links keep their screen color in print so readers can see
+       which text is a URL; chrome/footer links stay muted via inherit. */
+    .slide a {
+        color: var(--colloquium-link) !important;
+    }
+
+    /* Never ask Chromium to snapshot a remote frame into the PDF. Depending on
+       the site's headers and load timing, that produces a blank or partial
+       frame. Preserve the live iframe in HTML and print a stable linked card. */
+    .colloquium-iframe {
+        display: none !important;
+    }
+
+    .colloquium-iframe-print-snapshot {
+        display: block !important;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--colloquium-border);
+        border-radius: 6px;
+    }
+
+    /* A captured snapshot supersedes the linked card. */
+    .colloquium-iframe-print-snapshot + .colloquium-iframe-print-fallback {
+        display: none !important;
+    }
+
+    .colloquium-iframe-print-fallback {
+        display: flex !important;
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: center;
+        width: 100%;
+        padding: 1em 1.25em;
+        border: 2px solid var(--colloquium-border);
+        border-left: 8px solid var(--colloquium-accent);
+        border-radius: 10px;
+        background: var(--colloquium-bg);
+        text-align: left;
+    }
+
+    /* The live iframe reserves layout height on screen; in print the compact
+       card replaces it, so drop the container's reserved min-height too. */
+    .colloquium-iframe-container {
+        min-height: 0 !important;
+        height: auto !important;
+    }
+
+    .colloquium-iframe-print-title {
+        margin-bottom: 0.55em;
+        color: var(--colloquium-heading);
+        font-family: var(--colloquium-font-heading);
+        font-size: 1.15em;
+        line-height: 1.25;
+    }
+
+    .slide a.colloquium-iframe-print-link {
+        color: var(--colloquium-link) !important;
+        font-size: 0.8em;
+        overflow-wrap: anywhere;
     }
 
     .slide a.colloquium-cite,

@@ -79,3 +79,10 @@ colloquium/
     ├── theme.css     # Default theme
     └── presentation.js  # Navigation engine
 ```
+
+## Changelog
+
+Every PR must add exactly **one line** to `CHANGELOG.md` under `## [Unreleased]`,
+following the instructions at the top of that file (one line per PR, ending with
+the PR link). Multiple changes in one PR get folded into a single line — do not
+add one bullet per change.

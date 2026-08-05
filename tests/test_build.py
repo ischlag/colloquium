@@ -147,6 +147,29 @@ class TestBuildDeck:
         assert ".slide .katex-display {" in html
         assert "overflow: visible !important;" in html
 
+    def test_print_css_swaps_live_iframes_for_linked_fallbacks(self):
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Embed",
+            content=(
+                "```iframe\n"
+                "src: https://example.com/embed.html\n"
+                "title: Interactive demo\n"
+                "```"
+            ),
+        )
+        html = build_deck(deck)
+
+        assert '<iframe class="colloquium-iframe"' in html
+        assert '<div class="colloquium-iframe-print-fallback">' in html
+        assert (
+            ".colloquium-iframe-print-fallback,\n"
+            ".colloquium-iframe-print-snapshot {\n    display: none;"
+        ) in html
+        print_css = html[html.index("@media print") :]
+        assert ".colloquium-iframe {\n        display: none !important;" in print_css
+        assert ".colloquium-iframe-print-fallback {\n        display: flex !important;" in print_css
+
     def test_align_center_centers_standalone_images(self):
         deck = Deck(title="Test")
         deck.add_slide(title="Centered", content="![Alt](image.png)", classes=["align-center"])

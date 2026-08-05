@@ -1,5 +1,6 @@
 import html as html_module
 import re
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -69,6 +70,15 @@ def _width_css(width: str) -> str:
     return f"{width}px" if width.isdigit() else width
 
 
+def _print_link_label(src: str) -> str:
+    """Return a compact, human-readable label for the printed link."""
+    try:
+        hostname = urlsplit(src).hostname
+    except ValueError:
+        hostname = None
+    return hostname or "Open interactive content"
+
+
 def process(yaml_str: str) -> str:
     raw = html_module.unescape(yaml_str.strip())
     try:
@@ -105,6 +115,8 @@ def process(yaml_str: str) -> str:
     )
 
     src_attr = html_module.escape(src, quote=True)
+    print_title = title or "Interactive content"
+    print_link_label = html_module.escape(_print_link_label(src), quote=False)
     allow_attr = " allowfullscreen" if allow else ""
     keyboard_attr = str(preserve_keyboard).lower()
     scrolling_attr = (
@@ -117,5 +129,9 @@ def process(yaml_str: str) -> str:
         f'data-colloquium-preserve-keyboard="{keyboard_attr}" '
         f'width="{html_module.escape(width, quote=True)}" height="{height}" '
         f'frameborder="{frameborder}"{scrolling_attr}{allow_attr} '
-        f'style="{html_module.escape(style, quote=True)}"></iframe></div>'
+        f'style="{html_module.escape(style, quote=True)}"></iframe>'
+        f'<div class="colloquium-iframe-print-fallback">'
+        f'<strong class="colloquium-iframe-print-title">{print_title}</strong>'
+        f'<a class="colloquium-iframe-print-link" href="{src_attr}">{print_link_label}</a>'
+        f'</div></div>'
     )
