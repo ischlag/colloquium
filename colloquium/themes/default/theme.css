@@ -722,6 +722,43 @@ html, body {
 }
 
 /* ===== Utility: Vertical Alignment ===== */
+/* ===== Utility: Tall right figure =====
+   Opt-in slide class (<!-- class: img-tall-right -->) for columns slides:
+   the right column's captioned figure escapes the grid and runs from the
+   top of the slide to the bottom of the content area, caption pinned
+   beneath. The caption-fit pass skips absolutely positioned figures, so
+   these rules own the layout. */
+.slide.img-tall-right { position: relative; }
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child {
+    position: absolute;
+    top: 10px;
+    bottom: 42px;
+    right: 30px;
+    width: 55%;
+    height: auto;
+    max-height: none;
+    margin: 0;
+    display: block;
+}
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: calc(100% - 1.5em);
+    width: 100%;
+    max-width: none;
+    max-height: none;
+    object-fit: contain;
+}
+.slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > figcaption {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+}
+
 .valign-top.active { justify-content: flex-start; }
 .valign-center.active { justify-content: center; }
 .valign-bottom.active { justify-content: flex-end; }
@@ -1701,6 +1738,20 @@ body:hover .colloquium-present {
     .size-normal { font-size: 24px; }
     .size-large { font-size: 28px; }
 
+    /* img-tall-right: keep the full-height figure layout in print; the
+       generic grid-figure fallback above would otherwise force height auto
+       and a capped max-height. */
+    .slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child {
+        width: 55% !important;
+        max-width: 55% !important;
+    }
+    .slide.img-tall-right .colloquium-grid > .col:last-child > figure.colloquium-figure:first-child:last-child > img {
+        width: 100% !important;
+        height: calc(100% - 1.5em) !important;
+        max-width: none !important;
+        max-height: none !important;
+    }
+
     .colloquium-progress,
     .colloquium-picker-overlay,
     .colloquium-present,
@@ -1731,13 +1782,19 @@ body:hover .colloquium-present {
         align-items: flex-start;
         justify-content: center;
         width: 100%;
-        min-height: inherit;
-        padding: 1.2em 1.35em;
+        padding: 1em 1.25em;
         border: 2px solid var(--colloquium-border);
         border-left: 8px solid var(--colloquium-accent);
         border-radius: 10px;
         background: var(--colloquium-bg);
         text-align: left;
+    }
+
+    /* The live iframe reserves layout height on screen; in print the compact
+       card replaces it, so drop the container's reserved min-height too. */
+    .colloquium-iframe-container {
+        min-height: 0 !important;
+        height: auto !important;
     }
 
     .colloquium-iframe-print-label {

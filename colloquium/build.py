@@ -1389,6 +1389,10 @@ window.colloquiumFitCaptionedFiguresIn = function(root) {
         var caption = figure.querySelector("figcaption");
         if (!img || !caption) return;
 
+        // Authors can take over layout entirely (e.g. absolutely positioned
+        // full-height figures); leave those untouched.
+        if (window.getComputedStyle(figure).position === "absolute") return;
+
         var container = figure.parentElement;
         if (!container) return;
 
@@ -1408,8 +1412,15 @@ window.colloquiumFitCaptionedFiguresIn = function(root) {
         }
 
         var availableWidth = container.clientWidth;
-        var availableHeight = container.clientHeight;
-        if (!availableWidth || !availableHeight) return;
+        // The caption sits below the image inside the figure: reserve its
+        // height (plus the figure's own gap) so the scaled image + caption
+        // fit the cell together instead of the caption overflowing onto
+        // whatever sits below (usually the footer).
+        var captionHeight = caption.offsetHeight || 0;
+        var figureStyle = window.getComputedStyle(figure);
+        var figureGap = parseFloat(figureStyle.rowGap || figureStyle.gap) || 0;
+        var availableHeight = container.clientHeight - captionHeight - figureGap;
+        if (!availableWidth || availableHeight <= 0) return;
 
         var scale = Math.min(
             availableWidth / naturalWidth,

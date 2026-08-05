@@ -12,6 +12,8 @@ One line per PR for easy copy into GitHub releases.
 ## [Unreleased]
 
 - Print/PDF export renders iframe embeds as stable linked cards (title + hostname link) instead of asking Chromium to snapshot remote frames, which produced blank or partial captures; live HTML iframes are unchanged ([#51](https://github.com/natolambert/colloquium/pull/51))
+- Fix captioned-figure fitting scaling images to the full cell height so the caption overflowed onto the footer: the fit pass now reserves the caption's height, and skips absolutely positioned figures so author CSS can own layout. Captioned solo figures render slightly smaller (image + caption now fit the cell together) ([#50](https://github.com/natolambert/colloquium/pull/50))
+- Add opt-in `img-tall-right` slide class: on a columns slide, the right column's captioned figure runs from the slide top to the content bottom with the caption pinned beneath ([#50](https://github.com/natolambert/colloquium/pull/50))
 
 ## [0.2.3] - 2026-08-03
 
