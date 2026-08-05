@@ -98,22 +98,44 @@ _IFRAME_TAG_RE = re.compile(r'<iframe class="colloquium-iframe" src="([^"]+)"[^>
 
 
 def _capture_page_snapshot(browser: str, url: str, out_path: str) -> bool:
-    """Screenshot a URL with headless Chromium; True if a usable PNG landed."""
-    cmd = [
-        browser,
-        "--headless=new",
-        "--disable-gpu",
-        "--hide-scrollbars",
-        "--force-device-scale-factor=2",
-        f"--screenshot={out_path}",
-        "--window-size=1280,720",
-        f"--virtual-time-budget={_pdf_time_budget_ms()}",
-        url,
-    ]
-    try:
-        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
-        return False
+    """Screenshot a URL as an embedded frame; True if a usable PNG landed.
+
+    The URL is loaded inside an iframe on a minimal wrapper page rather than
+    navigated to directly: embed endpoints (e.g. YouTube's) only initialize
+    in an embedding context and refuse top-level navigation.
+    """
+    wrapper = (
+        "<!doctype html><html><head><meta charset='utf-8'></head>"
+        "<body style='margin:0;background:#fff'>"
+        f"<iframe src=\"{html_module.escape(url, quote=True)}\" "
+        "style='display:block;width:1280px;height:720px;border:none' "
+        "allowfullscreen></iframe></body></html>"
+    )
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        wrapper_path = Path(tmp_dir) / "colloquium-iframe-capture.html"
+        wrapper_path.write_text(wrapper, encoding="utf-8")
+        # Serve over loopback HTTP: embed providers (YouTube among them)
+        # require a real referrer/origin and reject frames on file:// pages.
+        with _serve_html_for_export(str(wrapper_path)) as wrapper_url:
+            cmd = [
+                browser,
+                "--headless=new",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--force-device-scale-factor=2",
+                f"--screenshot={out_path}",
+                "--window-size=1280,720",
+                f"--virtual-time-budget={_pdf_time_budget_ms()}",
+                wrapper_url,
+            ]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                FileNotFoundError,
+            ):
+                return False
     out = Path(out_path)
     return out.exists() and out.stat().st_size > 1024
 
