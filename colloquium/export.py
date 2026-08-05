@@ -128,16 +128,23 @@ def _capture_page_snapshot(browser: str, url: str, out_path: str) -> bool:
                 f"--virtual-time-budget={_pdf_time_budget_ms()}",
                 wrapper_url,
             ]
-            try:
-                subprocess.run(cmd, capture_output=True, timeout=120, check=True)
-            except (
-                subprocess.CalledProcessError,
-                subprocess.TimeoutExpired,
-                FileNotFoundError,
-            ):
-                return False
-    out = Path(out_path)
-    return out.exists() and out.stat().st_size > 1024
+            # A capture can complete as a solid blank frame when virtual time
+            # outruns the remote load. A uniform PNG compresses to a few KB
+            # while real content is far larger, so treat tiny files as
+            # failures and give the load timing a second chance.
+            for _attempt in range(2):
+                try:
+                    subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+                except (
+                    subprocess.CalledProcessError,
+                    subprocess.TimeoutExpired,
+                    FileNotFoundError,
+                ):
+                    return False
+                out = Path(out_path)
+                if out.exists() and out.stat().st_size > 16384:
+                    return True
+    return False
 
 
 def _inject_iframe_snapshots(html: str, browser: str) -> str:

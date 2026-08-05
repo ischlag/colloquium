@@ -44,7 +44,7 @@ class TestIframePrintSnapshots:
 
         def fake_capture(browser, url, out_path):
             import pathlib
-            pathlib.Path(out_path).write_bytes(b"\x89PNG" + b"0" * 2048)
+            pathlib.Path(out_path).write_bytes(b"\x89PNG" + b"0" * 32768)
             return True
 
         monkeypatch.setattr(export_module, "_capture_page_snapshot", fake_capture)
