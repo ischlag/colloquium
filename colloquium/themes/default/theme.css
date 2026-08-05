@@ -209,8 +209,11 @@ html, body {
 }
 
 /* Remote iframe contents are interactive on screen but unreliable in browser
-   print output. The deterministic fallback is enabled only by print styles. */
-.colloquium-iframe-print-fallback {
+   print output. Export captures real page snapshots for print; the linked
+   card is a fallback when a snapshot could not be captured. Both are
+   print-only. */
+.colloquium-iframe-print-fallback,
+.colloquium-iframe-print-snapshot {
     display: none;
 }
 
@@ -1776,6 +1779,19 @@ body:hover .colloquium-present {
         display: none !important;
     }
 
+    .colloquium-iframe-print-snapshot {
+        display: block !important;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--colloquium-border);
+        border-radius: 6px;
+    }
+
+    /* A captured snapshot supersedes the linked card. */
+    .colloquium-iframe-print-snapshot + .colloquium-iframe-print-fallback {
+        display: none !important;
+    }
+
     .colloquium-iframe-print-fallback {
         display: flex !important;
         flex-direction: column;
@@ -1795,15 +1811,6 @@ body:hover .colloquium-present {
     .colloquium-iframe-container {
         min-height: 0 !important;
         height: auto !important;
-    }
-
-    .colloquium-iframe-print-label {
-        margin-bottom: 0.35em;
-        color: var(--colloquium-muted);
-        font-size: 0.65em;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
     }
 
     .colloquium-iframe-print-title {

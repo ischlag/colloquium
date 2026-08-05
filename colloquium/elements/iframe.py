@@ -131,7 +131,6 @@ def process(yaml_str: str) -> str:
         f'frameborder="{frameborder}"{scrolling_attr}{allow_attr} '
         f'style="{html_module.escape(style, quote=True)}"></iframe>'
         f'<div class="colloquium-iframe-print-fallback">'
-        f'<span class="colloquium-iframe-print-label">Interactive content</span>'
         f'<strong class="colloquium-iframe-print-title">{print_title}</strong>'
         f'<a class="colloquium-iframe-print-link" href="{src_attr}">{print_link_label}</a>'
         f'</div></div>'

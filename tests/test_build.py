@@ -162,7 +162,10 @@ class TestBuildDeck:
 
         assert '<iframe class="colloquium-iframe"' in html
         assert '<div class="colloquium-iframe-print-fallback">' in html
-        assert ".colloquium-iframe-print-fallback {\n    display: none;" in html
+        assert (
+            ".colloquium-iframe-print-fallback,\n"
+            ".colloquium-iframe-print-snapshot {\n    display: none;"
+        ) in html
         print_css = html[html.index("@media print") :]
         assert ".colloquium-iframe {\n        display: none !important;" in print_css
         assert ".colloquium-iframe-print-fallback {\n        display: flex !important;" in print_css

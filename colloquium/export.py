@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import html as html_module
 import http.server
 import os
+import re
 import shutil
 import socketserver
 import subprocess
@@ -91,6 +94,89 @@ def _serve_html_for_export(html_path: str):
             thread.join(timeout=2)
 
 
+_IFRAME_TAG_RE = re.compile(r'<iframe class="colloquium-iframe" src="([^"]+)"[^>]*></iframe>')
+
+
+def _capture_page_snapshot(browser: str, url: str, out_path: str) -> bool:
+    """Screenshot a URL with headless Chromium; True if a usable PNG landed."""
+    cmd = [
+        browser,
+        "--headless=new",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        "--force-device-scale-factor=2",
+        f"--screenshot={out_path}",
+        "--window-size=1280,720",
+        f"--virtual-time-budget={_pdf_time_budget_ms()}",
+        url,
+    ]
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=120, check=True)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+    out = Path(out_path)
+    return out.exists() and out.stat().st_size > 1024
+
+
+def _inject_iframe_snapshots(html: str, browser: str) -> str:
+    """Insert real page screenshots after each iframe for print output.
+
+    Chromium's print-to-pdf renders remote frames unreliably (blank or
+    half-loaded depending on headers and timing). Instead, screenshot each
+    iframe's URL as a normal page — exactly what the live embed shows — and
+    print that image. The linked-card fallback that follows each iframe in
+    the markup is suppressed by CSS when a snapshot is present, so it only
+    appears if the capture fails (e.g. offline).
+    """
+    snapshots: dict[str, str | None] = {}
+
+    def replace(match: re.Match) -> str:
+        escaped_src = match.group(1)
+        url = html_module.unescape(escaped_src)
+        if url not in snapshots:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp_path = tmp.name
+            try:
+                if _capture_page_snapshot(browser, url, tmp_path):
+                    data = Path(tmp_path).read_bytes()
+                    snapshots[url] = base64.b64encode(data).decode("ascii")
+                else:
+                    snapshots[url] = None
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+        encoded = snapshots[url]
+        if encoded is None:
+            return match.group(0)
+        return (
+            match.group(0)
+            + '<img class="colloquium-iframe-print-snapshot" '
+            + f'src="data:image/png;base64,{encoded}" alt="" />'
+        )
+
+    return _IFRAME_TAG_RE.sub(replace, html)
+
+
+@contextmanager
+def _print_ready_html(html_path: str, browser: str):
+    """Yield a path to print, with iframe snapshots injected when present.
+
+    The temp file lives next to the original so relative asset paths keep
+    resolving, and is removed afterwards.
+    """
+    html_file = Path(html_path)
+    html = html_file.read_text(encoding="utf-8")
+    if not _IFRAME_TAG_RE.search(html):
+        yield html_path
+        return
+    injected = _inject_iframe_snapshots(html, browser)
+    tmp = html_file.with_name(f".{html_file.stem}-print{html_file.suffix}")
+    tmp.write_text(injected, encoding="utf-8")
+    try:
+        yield str(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def _export_pdf_from_html(html_path: str, output_path: str) -> str | None:
     """Export an existing HTML deck to PDF using a system browser."""
     browser = _find_browser()
@@ -102,7 +188,9 @@ def _export_pdf_from_html(html_path: str, output_path: str) -> str | None:
 
     # Use Chromium's headless print-to-pdf
     # 10in x 5.625in = 16:9 landscape, matching @page size in print CSS
-    with _serve_html_for_export(html_path) as html_url:
+    with _print_ready_html(html_path, browser) as print_path, _serve_html_for_export(
+        print_path
+    ) as html_url:
         cmd = [
             browser,
             "--headless",
