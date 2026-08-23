@@ -292,3 +292,14 @@ def test_update_style_and_place_style_props():
     assert chunk.get_place(0).style == "color: #e4002b; border: 1px solid #000"
     chunk.set_place_style_props(0, color=None)
     assert chunk.get_place(0).style == "border: 1px solid #000"
+
+
+def test_set_flow_image_size():
+    chunk = SlideChunk("## T\n\n![A figure](images/fig.png)\n\n|||\n\n<img src=\"b.png\" alt=\"B\" style=\"height: 380px; width: auto; border-radius: 8px;\">")
+    chunk.set_flow_image_size(0, width_px=512.4)
+    assert '<img src="images/fig.png" alt="A figure" style="width: 512px">' in chunk.text
+    chunk.set_flow_image_size(1, width_px=300)
+    assert 'style="width: 300px; border-radius: 8px"' in chunk.text
+    chunk.set_flow_image_size(1, height_px=200)
+    assert 'style="border-radius: 8px; height: 200px"' in chunk.text
+    assert [r[2] for r in chunk.flow_image_refs()] == ["images/fig.png", "b.png"]

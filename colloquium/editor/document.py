@@ -374,6 +374,35 @@ class SlideChunk:
             found.append((m.start(), m.end(), m.group("src")))
         return sorted(found)
 
+    def set_flow_image_size(self, k: int, width_px: float | None = None, height_px: float | None = None) -> None:
+        """Resize an inline image in the flow by writing an explicit width or height.
+
+        Markdown images become ``<img>`` tags (markdown has no size syntax);
+        the other dimension is cleared so the aspect ratio is preserved.
+        """
+        start, end, src = self.flow_image_refs()[k]
+        raw = self.text[start:end]
+        props: dict[str, str | None] = {}
+        if width_px is not None:
+            props.update(width=f"{int(round(width_px))}px", height=None)
+        if height_px is not None:
+            props.update(height=f"{int(round(height_px))}px", width=None)
+        m = _HTML_IMG_RE.fullmatch(raw)
+        if m:
+            sm = re.search(r'\sstyle="([^"]*)"', raw)
+            if sm:
+                new_style = update_style(sm.group(1), **props)
+                tag = raw[: sm.start()] + f' style="{new_style}"' + raw[sm.end():]
+            else:
+                new_style = update_style("", **props)
+                tag = raw[:-1].rstrip("/").rstrip() + f' style="{new_style}">'
+        else:
+            mm = _MD_IMAGE_RE.fullmatch(raw)
+            alt = re.match(r"!\[([^\]]*)\]", raw).group(1) if mm else ""
+            alt_attr = f' alt="{alt}"' if alt else ""
+            tag = f'<img src="{src}"{alt_attr} style="{update_style("", **props)}">'
+        self.text = self.text[:start] + tag + self.text[end:]
+
     def convert_flow_image_to_place(self, k: int, x: float, y: float, w: float) -> int:
         start, end, src = self.flow_image_refs()[k]
         # drop a figure/paragraph wrapper line if the image was alone on it

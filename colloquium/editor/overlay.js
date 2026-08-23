@@ -228,6 +228,8 @@
     const ro = box.querySelector(".ce-readout");
     if (state.selection && state.selection.kind === "html") {
       ro.textContent = `left ${Math.round(p.x * PX_W)}px  top ${Math.round(p.y * PX_H)}px  w ${Math.round(p.w * PX_W)}px`;
+    } else if (state.selection && state.selection.kind === "img") {
+      ro.textContent = `inline image  w ${Math.round(p.w * PX_W)}px  h ${Math.round(p.h * PX_H)}px  (drag to place freely)`;
     } else {
       ro.textContent = `x ${round(p.x)}  y ${round(p.y)}  w ${round(p.w)}  h ${round(p.h)}`;
     }
@@ -266,7 +268,7 @@
     if (!state.slide) return;
     const sel = state.selection;
     if (!sel) return;
-    if (isMovable(sel)) {
+    if (isMovable(sel) || sel.kind === "img") {
       const el = elOf(sel);
       if (el) updateBox(el);
       drawExtraBoxes();
@@ -381,7 +383,17 @@
       sel = { kind: "place", index: parseInt(el.dataset.placeIndex, 10) };
     } else {
       el = htmlAbsOf(e.target);
-      if (!el) return;
+      if (!el) {
+        const img = e.target.closest("img");
+        const k = img ? flowImgEls().indexOf(img) : -1;
+        if (k < 0) return;
+        // Dragging an inline image lifts it out of the flow: on drop it becomes
+        // a placed image at the drop position.
+        if (!sameSel(state.selection, { kind: "img", index: k })) select({ kind: "img", index: k }, true);
+        e.preventDefault();
+        state.drag = { mode: "move-img", el: img, index: k, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(img), moved: false };
+        return;
+      }
       sel = { kind: "html", index: htmlAbsEls().indexOf(el) };
     }
     if (e.shiftKey) return; // shift-click toggles membership on click
@@ -398,12 +410,20 @@
   }
 
   function onHandleDown(e) {
-    if (e.button !== 0 || !isMovable(state.selection)) return;
+    if (e.button !== 0 || !state.selection) return;
+    if (!isMovable(state.selection) && state.selection.kind !== "img") return;
     const el = elOf(state.selection);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
     const box = elPercentBox(el);
+    if (state.selection.kind === "img") {
+      state.drag = {
+        mode: "resize-img", handle: e.currentTarget.dataset.handle, el: el, index: state.selection.index,
+        start: toPercent(e.clientX, e.clientY), orig: box, moved: false, aspect: box.h > 0 ? box.w / box.h : 1,
+      };
+      return;
+    }
     state.drag = {
       mode: "resize", handle: e.currentTarget.dataset.handle, el: el, sel: state.selection,
       start: toPercent(e.clientX, e.clientY), orig: box, moved: false,
@@ -427,6 +447,38 @@
     const dy = cur.y - d.start.y;
     if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) d.moved = true;
 
+    if (d.mode === "move-img") {
+      d.el.style.transform = `translate(${dx * PX_W}px, ${dy * PX_H}px)`;
+      d.el.style.position = "relative";
+      d.el.style.zIndex = "50";
+      d.last = { x: d.orig.x + dx, y: d.orig.y + dy, w: d.orig.w, h: d.orig.h };
+      updateBox(d.el);
+      return;
+    }
+    if (d.mode === "resize-img") {
+      const hnd = d.handle;
+      let w = d.orig.w, h = d.orig.h;
+      if (hnd.includes("e")) w = d.orig.w + dx;
+      if (hnd.includes("w")) w = d.orig.w - dx;
+      if (hnd.includes("s")) h = d.orig.h + dy;
+      if (hnd.includes("n")) h = d.orig.h - dy;
+      w = Math.max(2, w); h = Math.max(1, h);
+      const vertical = hnd === "n" || hnd === "s";
+      if (!vertical) {
+        // corners and side handles scale by width, keeping the aspect ratio
+        d.el.style.width = Math.round(w * PX_W) + "px";
+        d.el.style.height = "auto";
+        d.el.style.maxWidth = "none"; d.el.style.maxHeight = "none";
+        d.last = { width: w * PX_W };
+      } else {
+        d.el.style.height = Math.round(h * PX_H) + "px";
+        d.el.style.width = "auto";
+        d.el.style.maxWidth = "none"; d.el.style.maxHeight = "none";
+        d.last = { height: h * PX_H };
+      }
+      updateBox(d.el);
+      return;
+    }
     if (d.mode === "move") {
       let x = snap(d.orig.x + dx);
       let y = snap(d.orig.y + dy);
@@ -477,8 +529,23 @@
     if (!d) return;
     state.drag = null;
     if (state.guides) { state.guides.v.style.display = "none"; state.guides.h.style.display = "none"; }
-    if (!d.moved) return;
+    if (!d.moved) {
+      if (d.mode === "move-img") { d.el.style.transform = ""; d.el.style.position = ""; d.el.style.zIndex = ""; }
+      return;
+    }
     state.suppressClick = Date.now();
+    if (d.mode === "move-img") {
+      const p = d.last || d.orig;
+      emit("ce-img-move", { index: d.index, x: round(p.x), y: round(p.y), w: round(p.w) });
+      return;
+    }
+    if (d.mode === "resize-img") {
+      const payload = { index: d.index };
+      if (d.last && d.last.width) payload.width = Math.round(d.last.width);
+      if (d.last && d.last.height) payload.height = Math.round(d.last.height);
+      emit("ce-img-size", payload);
+      return;
+    }
     if (d.mode === "move") {
       emitGeometry(d.members.map((m) => geometryItem(m.sel, m.el, m.last || m.orig, {})));
       return;

@@ -670,7 +670,7 @@ def _editor_page(ui, app, st: EditorState):
         src = refs[i][2]
         ui.label("Inline image").classes("ce-section")
         ui.label(src).classes("text-xs font-mono break-all")
-        ui.label("This image flows with the text. Convert it to a placed element to move, resize and crop it freely.").classes("text-xs text-gray-400")
+        ui.label("Inline image: drag a handle to resize it in place (corners keep the aspect ratio); drag the image itself to lift it out of the flow and place it freely. Placed images can also be cropped.").classes("text-xs text-gray-400")
 
         def convert():
             b = box or {"x": 30, "y": 20, "w": 40}
@@ -817,6 +817,22 @@ def _editor_page(ui, app, st: EditorState):
             inner = inner[len(a):-len(b)] if inner.startswith(a) and inner.endswith(b) else f"{a}{inner}{b}"
             set_html_inner(i, inner)
 
+    def _convert_selected_img():
+        sel = st.selection
+        if not sel or sel.get("kind") != "img":
+            return
+        b = sel.get("box") or {"x": 30, "y": 20, "w": 40}
+        k = int(sel["index"])
+        if k >= len(st.slide.flow_image_refs()):
+            return
+
+        def apply():
+            idx = st.slide.convert_flow_image_to_place(k, float(b["x"]), float(b["y"]), float(b["w"]))
+            st.selection = {"kind": "place", "index": idx}
+            st.extra = []
+
+        mutate(apply)
+
     @ui.refreshable
     def toolbar():
         t = _text_target()
@@ -833,6 +849,11 @@ def _editor_page(ui, app, st: EditorState):
                         ui.button("Reset crop", icon="crop_free", on_click=lambda: clear_crop(i)).props("flat dense size=sm")
                     ui.button("Replace", icon="folder", on_click=lambda: add_image_dialog(replace_index=i)).props("flat dense size=sm")
                     return
+            if sel and sel.get("kind") == "img":
+                ui.label("Inline image").classes("ce-tb-label")
+                ui.label("drag handles to resize in place · drag the image to place it freely").classes("text-xs")
+                ui.button("Place freely", icon="open_with", on_click=lambda: _convert_selected_img()).props("flat dense size=sm")
+                return
             ui.label("Select a text element to format it · double-click to edit text").classes("ce-tb-label")
             return
         kind, i, obj = t
@@ -1349,6 +1370,30 @@ def _editor_page(ui, app, st: EditorState):
             return refs[i].inner if i < len(refs) else None
         return None
 
+    def on_img_size(e):
+        a = e.args or {}
+        k = int(a["index"])
+        if k >= len(st.slide.flow_image_refs()):
+            notify("Cannot map this image to the markdown source", "warning")
+            return
+        st.selection = {"kind": "img", "index": k}
+        mutate(lambda: st.slide.set_flow_image_size(k, width_px=a.get("width"), height_px=a.get("height")))
+
+    def on_img_move(e):
+        a = e.args or {}
+        k = int(a["index"])
+        if k >= len(st.slide.flow_image_refs()):
+            notify("Cannot map this image to the markdown source", "warning")
+            return
+
+        def apply():
+            idx = st.slide.convert_flow_image_to_place(k, float(a["x"]), float(a["y"]), float(a["w"]))
+            st.selection = {"kind": "place", "index": idx}
+            st.extra = []
+
+        mutate(apply)
+        notify("Image is now placed freely (was inline)")
+
     def on_crop(e):
         a = e.args or {}
         i = int(a["index"])
@@ -1417,6 +1462,8 @@ def _editor_page(ui, app, st: EditorState):
     ui.on("ce-select", on_select)
     ui.on("ce-geometry", on_geometry)
     ui.on("ce-crop", on_crop)
+    ui.on("ce-img-size", on_img_size)
+    ui.on("ce-img-move", on_img_move)
     ui.on("ce-command", on_command)
     ui.on("ce-ready", on_ready)
     ui.on("ce-edit-request", on_edit_request)
