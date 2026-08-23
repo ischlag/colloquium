@@ -101,6 +101,24 @@ def _capture(args):
             print(f"Captured: {path}")
 
 
+def _edit(args):
+    """Open the visual slide editor."""
+    try:
+        from colloquium.editor.app import run_editor
+    except ImportError as exc:
+        print(
+            f"Error: the editor needs extra dependencies ({exc}).\n"
+            "Install with: uv pip install 'colloquium[editor]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if args.file and not Path(args.file).exists():
+        print(f"Error: {args.file} not found", file=sys.stderr)
+        sys.exit(1)
+    run_editor(args.file, port=args.port, open_browser=not args.no_browser)
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="colloquium",
@@ -139,6 +157,13 @@ def main():
     capture_parser.add_argument("-o", "--output", help="Output directory (default: slides/ next to input)")
     capture_parser.add_argument("-s", "--slide", type=int, help="Capture a single slide (1-indexed)")
     capture_parser.set_defaults(func=_capture)
+
+    # edit
+    edit_parser = subparsers.add_parser("edit", help="Visual slide editor (requires: pip install colloquium[editor])")
+    edit_parser.add_argument("file", nargs="?", help="Deck markdown file (omit for a file picker)")
+    edit_parser.add_argument("-p", "--port", type=int, default=8765, help="Port (default: 8765)")
+    edit_parser.add_argument("--no-browser", action="store_true", help="Do not open a browser window")
+    edit_parser.set_defaults(func=_edit)
 
     args = parser.parse_args()
 

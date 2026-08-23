@@ -15,6 +15,7 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 from colloquium.md import create_base_md
 
 from colloquium import elements
+from colloquium.elements import place
 from colloquium.deck import Deck
 from colloquium.slide import Slide
 
@@ -1227,6 +1228,8 @@ def _build_slide_html(
     inline_footnote_side = slide.metadata.get("footnotes_position", "right")
     slide_content = slide.content
     inline_footnotes = {"left": [], "right": []}
+    # Free-positioned blocks leave the flow entirely and get their own layer.
+    slide_content, place_specs = place.extract(slide_content)
     if slide_content:
         slide_content, inline_footnotes = _extract_inline_footnotes(
             slide_content,
@@ -1272,6 +1275,10 @@ def _build_slide_html(
                 rendered, fragment_count = _process_fragments(rendered, frag_animate)
             content_style_attr = f' style="{content_style}"' if content_style else ""
             parts.append(f'<div class="{" ".join(content_classes)}"{content_style_attr}>{rendered}</div>')
+
+    place_layer = place.render_layer(place_specs, md)
+    if place_layer:
+        parts.append(place_layer)
 
     # Per-slide citation footnotes (floating above footer)
     cite_left = slide.metadata.get("cite_left", [])
@@ -1384,6 +1391,38 @@ window.colloquiumFitDisplayMathIn = function(root) {
     });
 };
 
+// Placed images without an explicit height keep the natural aspect ratio of
+// their (cropped) source. aspect-ratio works on hidden slides too, so this
+// runs once for the whole document.
+window.colloquiumFitPlaceImages = function(root) {
+    var scope = root || document;
+    scope.querySelectorAll(".colloquium-place--image").forEach(function(box) {
+        if (box.style.height) return;
+        var img = box.querySelector("img");
+        if (!img) return;
+        var apply = function() {
+            var nw = img.naturalWidth || 0;
+            var nh = img.naturalHeight || 0;
+            if (!nw || !nh) return;
+            var crop = (box.getAttribute("data-crop") || "").split(" ").map(parseFloat);
+            var cw = crop.length === 4 && crop[2] > 0 ? crop[2] : 1;
+            var ch = crop.length === 4 && crop[3] > 0 ? crop[3] : 1;
+            // Box percentages are relative to a 16:9 slide, so correct for it.
+            var slide = box.closest(".slide");
+            var sw = slide ? slide.offsetWidth || 1280 : 1280;
+            var sh = slide ? slide.offsetHeight || 720 : 720;
+            var ratio = (nw * cw) / (nh * ch);
+            var widthPct = parseFloat(box.style.width) || 0;
+            if (!widthPct) return;
+            var heightPct = widthPct * sw / sh / ratio;
+            box.style.height = heightPct + "%";
+            box.setAttribute("data-auto-height", "1");
+        };
+        if (img.complete && img.naturalWidth) apply();
+        else img.addEventListener("load", apply);
+    });
+};
+
 window.colloquiumFitCaptionedFiguresIn = function(root) {
     var scope = root || document;
     var selector = [
@@ -1482,6 +1521,7 @@ window.addEventListener("load", function() {
         hljs.highlightAll();
     }
     window.colloquiumFitCaptionedFiguresIn(document);
+    window.colloquiumFitPlaceImages(document);
     // Initialize Chart.js charts — temporarily show all slides so canvases
     // have dimensions, render charts, capture static print images, then restore.
     if (typeof Chart !== "undefined") {

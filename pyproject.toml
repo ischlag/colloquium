@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
 pptx = ["python-pptx>=1.0"]
+editor = ["nicegui>=2.0", "pillow>=10.0"]
 
 [project.scripts]
 colloquium = "colloquium.cli:main"

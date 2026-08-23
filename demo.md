@@ -186,6 +186,65 @@ messages:
 
 ---
 
+## Free placement
+
+Normal content flows as usual. ```` ```place ```` blocks pin images and text
+anywhere in slide percent coordinates and can crop images non-destructively.
+
+```place
+x: 52
+y: 18
+w: 44
+src: examples/rows-and-columns/rlhf_timeline_tikz.png
+crop: [0.05, 0.1, 0.6, 0.8]
+```
+
+```place
+x: 52
+y: 78
+w: 44
+size: 0.7
+align: center
+text: |
+  Cropped to the left 60% of the original, placed at x=52%, w=44%.
+```
+
+```place
+x: 4
+y: 62
+w: 40
+size: 0.85
+text: |
+  **Placed text** with $e^{i\pi}+1=0$ and a list:
+  - no column needed
+  - edited visually with `colloquium edit`
+```
+
+```place
+x: 4
+y: 40
+w: 40
+h: 16
+shape: rounded
+fill: "rgba(228, 0, 43, 0.08)"
+stroke: "#e4002b"
+stroke_width: 2
+size: 0.8
+text: |
+  Shapes: rect, rounded, ellipse, line, arrow
+```
+
+```place
+x: 45
+y: 48
+w: 6
+h: 0.1
+shape: arrow
+stroke: "#e4002b"
+```
+
+---
+
 <!-- columns: 2 -->
 
 ## Callout boxes
