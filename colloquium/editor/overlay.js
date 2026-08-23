@@ -26,6 +26,7 @@
     guides: null,
     drag: null,
     editor: null,
+    crop: null,
     suppressClick: 0,
   };
 
@@ -51,6 +52,10 @@
     .ce-editor { position: absolute; z-index: 1002; box-sizing: border-box; border: 2px solid #1e78ff; outline: none; background: rgba(255,255,255,0.97); color: #111; padding: 4px 6px; resize: none; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; line-height: 1.35; box-shadow: 0 4px 24px rgba(0,0,0,0.25); }
     .colloquium-place-layer { pointer-events: none; }
     .slide .colloquium-place-layer .colloquium-place { pointer-events: auto; }
+    .ce-crop-ghost { position: absolute; opacity: 0.35; pointer-events: none; z-index: 1003; max-width: none; max-height: none; }
+    .ce-crop-frame { position: absolute; z-index: 1004; box-sizing: border-box; border: 2px solid #ff8c1e; cursor: move; background: transparent; box-shadow: 0 0 0 9999px rgba(0,0,0,0.25); }
+    .ce-crop-frame .ce-handle { border-color: #ff8c1e; }
+    .ce-crop-hint { position: absolute; z-index: 1005; left: 50%; top: 8px; transform: translateX(-50%); font: 14px/1.4 system-ui, sans-serif; background: #ff8c1e; color: #fff; padding: 3px 10px; border-radius: 4px; pointer-events: none; }
   `;
 
   function emit(name, data) {
@@ -292,9 +297,10 @@
   function selectionPayload() {
     const sel = state.selection || { kind: "slide", index: 0 };
     const payload = { kind: sel.kind, index: sel.index, extra: state.extra.slice() };
-    if (sel.kind === "img") {
-      const el = elOf(sel);
-      if (el) payload.box = elPercentBox(el);
+    const el = elOf(sel);
+    if (sel.kind === "img" && el) payload.box = elPercentBox(el);
+    if (el && (sel.kind === "html" || sel.kind === "place")) {
+      payload.font = parseFloat(state.doc.defaultView.getComputedStyle(el).fontSize) || 0;
     }
     return payload;
   }
@@ -340,7 +346,7 @@
   // ---------- mouse ----------
   function onMouseOver(e) {
     state.doc.querySelectorAll(".ce-hover").forEach((el) => el.classList.remove("ce-hover"));
-    if (state.drag || state.editor) return;
+    if (state.drag || state.editor || state.crop) return;
     const hit = hitTest(e.target);
     if (!hit || hit.kind === "slide") return;
     const el = elOf(hit);
@@ -348,6 +354,7 @@
   }
 
   function onClick(e) {
+    if (state.crop) { e.preventDefault(); e.stopPropagation(); return; }
     if (state.suppressClick) {
       const fresh = Date.now() - state.suppressClick < 400;
       state.suppressClick = 0;
@@ -366,7 +373,7 @@
   }
 
   function onMouseDown(e) {
-    if (e.button !== 0 || state.editor) return;
+    if (e.button !== 0 || state.editor || state.crop) return;
     if (e.target.closest(".ce-box")) return;
     let el = e.target.closest(".colloquium-place");
     let sel = null;
@@ -485,12 +492,19 @@
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     const ctrl = e.ctrlKey || e.metaKey;
+    if (state.crop) {
+      if (e.key === "Escape") { e.preventDefault(); cropCancel(); }
+      else if (e.key === "Enter") { e.preventDefault(); cropCommit(); }
+      return;
+    }
+    if (ctrl && e.shiftKey && (e.key === "v" || e.key === "V")) { e.preventDefault(); emit("ce-command", { name: "paste_inplace" }); return; }
     if (ctrl && (e.key === "z" || e.key === "Z")) { e.preventDefault(); emit("ce-command", { name: e.shiftKey ? "redo" : "undo" }); return; }
     if (ctrl && e.key === "y") { e.preventDefault(); emit("ce-command", { name: "redo" }); return; }
     if (ctrl && e.key === "v") { e.preventDefault(); emit("ce-command", { name: "paste" }); return; }
     if (!state.selection) return;
     if (ctrl && e.key === "c") { e.preventDefault(); emit("ce-command", { name: "copy", selection: allSelected() }); return; }
     if (ctrl && e.key === "d") { e.preventDefault(); emit("ce-command", { name: "duplicate", selection: allSelected() }); return; }
+    if (ctrl && (e.key === "b" || e.key === "i")) { e.preventDefault(); format(e.key === "b" ? "bold" : "italic"); return; }
     if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown") && isMovable(state.selection)) {
       e.preventDefault();
       const name = e.key === "ArrowUp" ? (e.shiftKey ? "front" : "forward") : (e.shiftKey ? "back" : "backward");
@@ -609,8 +623,11 @@
     hideBox();
     ta.addEventListener("keydown", (e) => {
       e.stopPropagation();
+      const ctrl = e.ctrlKey || e.metaKey;
       if (e.key === "Escape") { e.preventDefault(); closeEditor(false); }
-      else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); closeEditor(true); }
+      else if (e.key === "Enter" && ctrl) { e.preventDefault(); closeEditor(true); }
+      else if (ctrl && e.key === "b") { e.preventDefault(); wrapSelection(ta, sel.kind, "bold"); }
+      else if (ctrl && e.key === "i") { e.preventDefault(); wrapSelection(ta, sel.kind, "italic"); }
     });
     ta.addEventListener("blur", () => closeEditor(true));
     ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; });
@@ -630,13 +647,190 @@
   }
 
   function onDblClick(e) {
-    if (state.editor) return;
+    if (state.editor || state.crop) return;
     const hit = hitTest(e.target);
     if (!hit || hit.kind === "slide") return;
     e.preventDefault();
     e.stopPropagation();
     if (!sameSel(hit, state.selection)) select(hit, true);
     requestEdit(hit);
+  }
+
+  // ---------- text formatting ----------
+  const MARKS = {
+    md: { bold: ["**", "**"], italic: ["*", "*"], code: ["`", "`"] },
+    html: { bold: ["<b>", "</b>"], italic: ["<i>", "</i>"], code: ["<code>", "</code>"] },
+  };
+
+  function wrapSelection(ta, kind, fmt) {
+    const m = (kind === "html" ? MARKS.html : MARKS.md)[fmt];
+    if (!m) return;
+    const a = ta.selectionStart, b = ta.selectionEnd;
+    const v = ta.value;
+    const inner = v.slice(a, b) || "text";
+    // toggle off if already wrapped
+    if (v.slice(a - m[0].length, a) === m[0] && v.slice(b, b + m[1].length) === m[1]) {
+      ta.value = v.slice(0, a - m[0].length) + inner + v.slice(b + m[1].length);
+      ta.setSelectionRange(a - m[0].length, b - m[0].length);
+    } else {
+      ta.value = v.slice(0, a) + m[0] + inner + m[1] + v.slice(b);
+      ta.setSelectionRange(a + m[0].length, a + m[0].length + inner.length);
+    }
+    ta.focus();
+  }
+
+  function format(fmt) {
+    if (state.editor) { wrapSelection(state.editor.ta, state.editor.sel.kind, fmt); return; }
+    if (!state.selection) return;
+    emit("ce-command", { name: "format", fmt: fmt, selection: [state.selection] });
+  }
+
+  // ---------- on-canvas crop ----------
+  function parseCrop(el) {
+    const c = (el.getAttribute("data-crop") || "").split(" ").map(parseFloat);
+    return c.length === 4 && c.every((v) => !isNaN(v)) ? c : [0, 0, 1, 1];
+  }
+
+  function cropEnter() {
+    const sel = state.selection;
+    if (!sel || sel.kind !== "place") return;
+    const el = placeEl(sel.index);
+    const img = el && el.querySelector("img");
+    if (!el || !img) return;
+    closeEditor(false);
+    const crop = parseCrop(el);
+    const b = elPercentBox(el);
+    const full = { x: b.x - (crop[0] / crop[2]) * b.w, y: b.y - (crop[1] / crop[3]) * b.h, w: b.w / crop[2], h: b.h / crop[3] };
+    const ghost = state.doc.createElement("img");
+    ghost.className = "ce-crop-ghost";
+    ghost.src = img.src;
+    const frame = state.doc.createElement("div");
+    frame.className = "ce-crop-frame";
+    HANDLES.forEach((h) => {
+      const hd = state.doc.createElement("div");
+      hd.className = "ce-handle ce-handle-" + h;
+      hd.dataset.handle = h;
+      hd.addEventListener("mousedown", (e) => cropDown(e, h));
+      frame.appendChild(hd);
+    });
+    frame.addEventListener("mousedown", (e) => cropDown(e, null));
+    const hint = state.doc.createElement("div");
+    hint.className = "ce-crop-hint";
+    hint.textContent = "Crop: drag handles to cut, drag inside to move the image. Enter applies, Esc cancels.";
+    state.slide.appendChild(ghost);
+    state.slide.appendChild(frame);
+    state.slide.appendChild(hint);
+    state.crop = { sel, el, img, ghost, frame, hint, full, box: { ...b }, autoHeight: !el.style.height || el.getAttribute("data-auto-height") === "1", drag: null };
+    hideBox();
+    cropRender();
+    state.doc.addEventListener("mousemove", cropMove, true);
+    state.doc.addEventListener("mouseup", cropUp, true);
+  }
+
+  function cropRender() {
+    const c = state.crop;
+    const f = c.full, b = c.box;
+    c.ghost.style.left = f.x + "%"; c.ghost.style.top = f.y + "%";
+    c.ghost.style.width = f.w + "%"; c.ghost.style.height = f.h + "%";
+    c.frame.style.left = b.x + "%"; c.frame.style.top = b.y + "%";
+    c.frame.style.width = b.w + "%"; c.frame.style.height = b.h + "%";
+    // live preview on the real element
+    const crop = cropValues();
+    c.el.style.left = b.x + "%"; c.el.style.top = b.y + "%";
+    c.el.style.width = b.w + "%"; c.el.style.height = b.h + "%";
+    c.img.style.position = "absolute";
+    c.img.style.width = (100 / crop[2]) + "%"; c.img.style.height = (100 / crop[3]) + "%";
+    c.img.style.left = (-crop[0] / crop[2] * 100) + "%"; c.img.style.top = (-crop[1] / crop[3] * 100) + "%";
+  }
+
+  function cropValues() {
+    const f = state.crop.full, b = state.crop.box;
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    return [clamp((b.x - f.x) / f.w), clamp((b.y - f.y) / f.h), Math.max(0.01, Math.min(1, b.w / f.w)), Math.max(0.01, Math.min(1, b.h / f.h))];
+  }
+
+  function cropDown(e, handle) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const c = state.crop;
+    c.drag = { handle, start: toPercent(e.clientX, e.clientY), box: { ...c.box }, full: { ...c.full } };
+  }
+
+  function cropMove(e) {
+    const c = state.crop;
+    if (!c || !c.drag) return;
+    e.preventDefault();
+    const cur = toPercent(e.clientX, e.clientY);
+    const dx = cur.x - c.drag.start.x, dy = cur.y - c.drag.start.y;
+    const f = c.drag.full, b0 = c.drag.box;
+    if (!c.drag.handle) {
+      // pan: move the full image under a fixed window, keep window inside image
+      let nx = f.x + dx, ny = f.y + dy;
+      nx = Math.min(b0.x, Math.max(b0.x + b0.w - f.w, nx));
+      ny = Math.min(b0.y, Math.max(b0.y + b0.h - f.h, ny));
+      c.full = { x: nx, y: ny, w: f.w, h: f.h };
+    } else {
+      const h = c.drag.handle;
+      let x = b0.x, y = b0.y, w = b0.w, hh = b0.h;
+      if (h.includes("e")) w = b0.w + dx;
+      if (h.includes("s")) hh = b0.h + dy;
+      if (h.includes("w")) { w = b0.w - dx; x = b0.x + dx; }
+      if (h.includes("n")) { hh = b0.h - dy; y = b0.y + dy; }
+      // window must stay inside the full image
+      if (x < f.x) { w -= f.x - x; x = f.x; }
+      if (y < f.y) { hh -= f.y - y; y = f.y; }
+      if (x + w > f.x + f.w) w = f.x + f.w - x;
+      if (y + hh > f.y + f.h) hh = f.y + f.h - y;
+      w = Math.max(1, w); hh = Math.max(1, hh);
+      c.box = { x, y, w, h: hh };
+    }
+    cropRender();
+  }
+
+  function cropUp() {
+    if (state.crop && state.crop.drag) state.crop.drag = null;
+  }
+
+  function cropExit() {
+    const c = state.crop;
+    if (!c) return;
+    state.doc.removeEventListener("mousemove", cropMove, true);
+    state.doc.removeEventListener("mouseup", cropUp, true);
+    [c.ghost, c.frame, c.hint].forEach((n) => n.parentNode && n.parentNode.removeChild(n));
+    state.crop = null;
+  }
+
+  function cropCommit() {
+    const c = state.crop;
+    if (!c) return;
+    const crop = cropValues().map((v) => Math.round(v * 10000) / 10000);
+    const b = c.box;
+    const payload = { index: c.sel.index, x: round(b.x), y: round(b.y), w: round(b.w), crop: crop };
+    if (!c.autoHeight) payload.h = round(b.h);
+    if (crop[0] === 0 && crop[1] === 0 && crop[2] === 1 && crop[3] === 1) payload.crop = null;
+    cropExit();
+    emit("ce-crop", payload);
+    applySelection();
+  }
+
+  function cropCancel() {
+    const c = state.crop;
+    if (!c) return;
+    cropExit();
+    emit("ce-command", { name: "refresh" });
+  }
+
+  function resetSize() {
+    const sel = state.selection;
+    if (!sel || sel.kind !== "place") return;
+    const el = placeEl(sel.index);
+    const img = el && el.querySelector("img");
+    if (!el || !img || !img.naturalWidth) return;
+    const crop = parseCrop(el);
+    const b = elPercentBox(el);
+    const w = (img.naturalWidth * crop[2]) / 1280 * 100;
+    emit("ce-geometry", { items: [{ kind: "place", index: sel.index, x: round(b.x), y: round(b.y), w: round(w) }] });
   }
 
   // ---------- binding ----------
@@ -655,6 +849,7 @@
     doc.head.appendChild(style);
     const refreshSlide = () => {
       state.editor = null;
+      state.crop = null;
       state.slide = doc.querySelector(".slide.active");
       if (state.slide) markHtmlAbs();
       applySelection();
@@ -692,5 +887,10 @@
     align(mode) { align(mode); },
     distribute(axis) { distribute(axis); },
     htmlAbsCount() { return state.slide ? htmlAbsEls().length : 0; },
+    format(fmt) { format(fmt); },
+    cropEnter() { cropEnter(); },
+    cropCommit() { cropCommit(); },
+    cropCancel() { cropCancel(); },
+    resetSize() { resetSize(); },
   };
 })();

@@ -269,19 +269,7 @@ class SlideChunk:
     def set_html_abs_style(self, i: int, **props: str | None) -> None:
         """Update inline style declarations (value None removes the key)."""
         ref = self.html_abs_refs()[i]
-        # keep original order for untouched keys, append new keys at the end
-        order = [k for k, _ in ref.decls]
-        out: list[tuple[str, str]] = []
-        for k, v in ref.decls:
-            if k in props:
-                if props[k] is not None:
-                    out.append((k, props[k]))
-            else:
-                out.append((k, v))
-        for k, v in props.items():
-            if k not in order and v is not None:
-                out.append((k, v))
-        new_style = format_inline_style(out)
+        new_style = update_style(ref.style, **props)
         # replace only the style attribute value inside the opening tag
         tag_text = self.text[ref.start : ref.end]
         tag_text = tag_text.replace(f'style="{ref.style}"', f'style="{new_style}"', 1)
@@ -401,6 +389,12 @@ class SlideChunk:
         self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + after.lstrip("\n")).strip("\n")
         return self.add_place(spec)
 
+    def set_place_style_props(self, i: int, **props: str | None) -> None:
+        """Update CSS declarations in a place block's ``style:`` (None removes)."""
+        spec = self.get_place(i)
+        spec.style = update_style(spec.style, **props)
+        self.set_place(i, spec)
+
     def add_place(self, spec: place.PlaceSpec) -> int:
         refs = self.place_refs()
         self.text = self.text.rstrip("\n") + "\n\n" + spec.to_markdown()
@@ -430,6 +424,24 @@ def parse_inline_style(style: str) -> list[tuple[str, str]]:
 
 def format_inline_style(decls: list[tuple[str, str]]) -> str:
     return "; ".join(f"{k}: {v}" for k, v in decls)
+
+
+def update_style(style: str, **props: str | None) -> str:
+    """Return *style* with declarations set/removed; untouched keys keep their order."""
+    props = {k.replace("_", "-"): v for k, v in props.items()}
+    out: list[tuple[str, str]] = []
+    seen = set()
+    for k, v in parse_inline_style(style):
+        if k in props:
+            seen.add(k)
+            if props[k] is not None:
+                out.append((k, props[k]))
+        else:
+            out.append((k, v))
+    for k, v in props.items():
+        if k not in seen and v is not None:
+            out.append((k, v))
+    return format_inline_style(out)
 
 
 def _px(value: str) -> float | None:

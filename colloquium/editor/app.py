@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from colloquium.editor import images
-from colloquium.editor.document import DeckDocument
+from colloquium.editor.document import DeckDocument, parse_inline_style
 from colloquium.elements import place
 
 LAYOUTS = [
@@ -41,6 +41,10 @@ html, body { height: 100%; margin: 0; }
 .ce-thumb .t { color: #1b1f27; }
 .ce-thumb .meta { color: #9aa3b2; font-size: 11px; margin-top: 2px; }
 .ce-center { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #2b2f36; }
+.ce-toolbar { min-height: 38px; display: flex; align-items: center; gap: 2px; padding: 2px 10px; background: #1f2329; color: #e6e8ec; border-bottom: 1px solid #3a3f47; }
+.ce-toolbar .q-btn { color: #e6e8ec; }
+.ce-toolbar .ce-tb-label { font-size: 12px; color: #9aa3b2; margin: 0 6px 0 10px; }
+.ce-toolbar .q-field { width: 44px; } .ce-toolbar .q-field__control { height: 28px; min-height: 28px; } .ce-toolbar input[type=color] { padding: 0; height: 26px; cursor: pointer; }
 .ce-frame-wrap { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 12px; }
 .ce-frame { width: min(100%, calc((100vh - 110px) * 16 / 9)); aspect-ratio: 16 / 9; border: 0; background: #000; box-shadow: 0 6px 30px rgba(0,0,0,0.4); }
 .ce-inspector { width: 360px; overflow-y: auto; border-left: 1px solid #e2e5ea; background: #fff; }
@@ -352,6 +356,7 @@ def _editor_page(ui, app, st: EditorState):
         else:
             highlight_thumb()
         inspector.refresh()
+        toolbar.refresh()
         if reload_frame:
             frame.props(f'src="{preview_src()}"')
             frame.update()
@@ -400,6 +405,8 @@ def _editor_page(ui, app, st: EditorState):
                 thumbs_frame = ui.element("iframe").classes("ce-thumbs-frame").props(f'id="ce-thumbs" src="{thumbs_src()}"')
 
             with ui.element("div").classes("ce-center"):
+                with ui.element("div").classes("ce-toolbar") as toolbar_pane:
+                    pass
                 with ui.element("div").classes("ce-frame-wrap"):
                     frame = ui.element("iframe").classes("ce-frame").props(f'id="ce-preview" src="{preview_src()}"')
                 with ui.row().classes("items-center px-3 py-1 gap-2 text-white text-xs"):
@@ -575,10 +582,13 @@ def _editor_page(ui, app, st: EditorState):
             ui.label("Image").classes("ce-section")
             ui.label(spec.src).classes("text-xs font-mono break-all")
             with ui.row().classes("gap-1"):
-                ui.button("Replace", icon="folder", on_click=lambda: add_image_dialog(replace_index=i)).props("flat dense")
-                ui.button("Crop", icon="crop", on_click=lambda: crop_dialog(i)).props("flat dense")
+                ui.button("Crop on canvas", icon="crop", on_click=lambda: ui.run_javascript("window.colloquiumEditor.cropEnter()")).props("flat dense")
+                ui.button("Crop dialog", icon="crop_original", on_click=lambda: crop_dialog(i)).props("flat dense")
+            with ui.row().classes("gap-1"):
+                ui.button("Reset size", icon="photo_size_select_actual", on_click=lambda: ui.run_javascript("window.colloquiumEditor.resetSize()")).props("flat dense")
                 if spec.crop:
-                    ui.button("Clear crop", icon="crop_free", on_click=lambda: clear_crop(i)).props("flat dense")
+                    ui.button("Reset crop", icon="crop_free", on_click=lambda: clear_crop(i)).props("flat dense")
+                ui.button("Replace", icon="folder", on_click=lambda: add_image_dialog(replace_index=i)).props("flat dense")
             if spec.crop:
                 ui.label("crop: " + ", ".join(f"{c:.3f}" for c in spec.crop)).classes("text-xs text-gray-500 font-mono")
         else:
@@ -725,6 +735,135 @@ def _editor_page(ui, app, st: EditorState):
             )
             ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
 
+    # --------------------------------------------------------- formatting toolbar
+    def _text_target():
+        """(kind, index, spec_or_ref) for the selected text-bearing element, or None."""
+        sel = st.selection
+        if not sel:
+            return None
+        i = int(sel["index"])
+        if sel["kind"] == "place":
+            refs = st.slide.place_refs()
+            if i < len(refs) and refs[i].spec.kind in {"text", "shape"}:
+                return ("place", i, refs[i].spec)
+        if sel["kind"] == "html":
+            refs = st.slide.html_abs_refs()
+            if i < len(refs):
+                return ("html", i, refs[i])
+        return None
+
+    def _style_get(target, key):
+        kind, i, obj = target
+        decls = dict(parse_inline_style(obj.style))
+        return decls.get(key)
+
+    def set_style(key, value):
+        t = _text_target()
+        if not t:
+            return
+        kind, i, _ = t
+        if _style_get(t, key) == value:
+            return
+        if kind == "place":
+            mutate(lambda: st.slide.set_place_style_props(i, **{key: value}), reload_frame=True)
+        else:
+            mutate(lambda: st.slide.set_html_abs_style(i, **{key: value}), reload_frame=True)
+
+    def font_step(delta: int):
+        t = _text_target()
+        if not t:
+            return
+        kind, i, obj = t
+        if kind == "place":
+            cur = obj.size if obj.size else 1.0
+            new = max(0.3, round(cur + 0.1 * delta, 2))
+            set_place_attr(i, "size", None if abs(new - 1.0) < 1e-6 else new)
+        else:
+            cur = _px_or_none(_style_get(t, "font-size")) or float((st.selection or {}).get("font") or 16)
+            set_style("font-size", f"{int(max(6, cur + 2 * delta))}px")
+
+    def set_text_align(value):
+        t = _text_target()
+        if not t:
+            return
+        kind, i, _ = t
+        if kind == "place":
+            set_place_attr(i, "align", value)
+        else:
+            set_style("text-align", value or None)
+
+    def toggle_border():
+        t = _text_target()
+        if not t:
+            return
+        cur = _style_get(t, "border")
+        set_style("border", None if cur else "2px solid currentColor")
+
+    def apply_format(fmt, sel):
+        kind, i = sel.get("kind"), int(sel.get("index", 0))
+        md = {"bold": ("**", "**"), "italic": ("*", "*"), "code": ("`", "`")}
+        html = {"bold": ("<b>", "</b>"), "italic": ("<i>", "</i>"), "code": ("<code>", "</code>")}
+        if kind == "place":
+            spec = st.slide.get_place(i)
+            a, b = md[fmt]
+            text = spec.text.rstrip("\n")
+            if not text:
+                return
+            text = text[len(a):-len(b)] if text.startswith(a) and text.endswith(b) else f"{a}{text}{b}"
+            set_place_text(i, text)
+        elif kind == "html":
+            inner = st.slide.html_abs_refs()[i].inner
+            a, b = html[fmt]
+            inner = inner[len(a):-len(b)] if inner.startswith(a) and inner.endswith(b) else f"{a}{inner}{b}"
+            set_html_inner(i, inner)
+
+    @ui.refreshable
+    def toolbar():
+        t = _text_target()
+        sel = st.selection
+        if not t:
+            if sel and sel.get("kind") == "place":
+                refs = st.slide.place_refs()
+                i = int(sel["index"])
+                if i < len(refs) and refs[i].spec.kind == "image":
+                    ui.label("Image").classes("ce-tb-label")
+                    ui.button("Crop on canvas", icon="crop", on_click=lambda: ui.run_javascript("window.colloquiumEditor.cropEnter()")).props("flat dense size=sm")
+                    ui.button("Reset size", icon="photo_size_select_actual", on_click=lambda: ui.run_javascript("window.colloquiumEditor.resetSize()")).props("flat dense size=sm").tooltip("Natural pixel size of the (cropped) image")
+                    if refs[i].spec.crop:
+                        ui.button("Reset crop", icon="crop_free", on_click=lambda: clear_crop(i)).props("flat dense size=sm")
+                    ui.button("Replace", icon="folder", on_click=lambda: add_image_dialog(replace_index=i)).props("flat dense size=sm")
+                    return
+            ui.label("Select a text element to format it · double-click to edit text").classes("ce-tb-label")
+            return
+        kind, i, obj = t
+        ui.label("Text").classes("ce-tb-label")
+        for icon, fmt, tip in [("format_bold", "bold", "Bold (Ctrl+B)"), ("format_italic", "italic", "Italic (Ctrl+I)"), ("code", "code", "Code")]:
+            ui.button(icon=icon, on_click=lambda e, f=fmt: ui.run_javascript(f"window.colloquiumEditor.format({_json(f)})")).props("flat dense size=sm").tooltip(tip)
+        ui.label("Size").classes("ce-tb-label")
+        ui.button(icon="remove", on_click=lambda: font_step(-1)).props("flat dense size=sm")
+        if kind == "place":
+            ui.label(f"{(obj.size or 1.0):.1f}x").classes("text-xs")
+        else:
+            fs = _px_or_none(_style_get(t, "font-size")) or float((sel or {}).get("font") or 0)
+            ui.label(f"{int(fs)}px" if fs else "auto").classes("text-xs")
+        ui.button(icon="add", on_click=lambda: font_step(1)).props("flat dense size=sm")
+        ui.label("Colour").classes("ce-tb-label")
+        ui.input(value=_hex(_style_get(t, "color")) or "#000000", on_change=lambda e: set_style("color", e.value)).props("type=color dense borderless").tooltip("Text colour")
+        ui.button(icon="format_color_reset", on_click=lambda: set_style("color", None)).props("flat dense size=sm").tooltip("Default colour")
+        ui.label("Fill").classes("ce-tb-label")
+        ui.input(value=_hex(_style_get(t, "background")) or "#ffffff", on_change=lambda e: set_style("background", e.value)).props("type=color dense borderless").tooltip("Background")
+        ui.button(icon="format_color_reset", on_click=lambda: set_style("background", None)).props("flat dense size=sm").tooltip("No background")
+        ui.button(icon="border_outer", on_click=lambda: toggle_border()).props("flat dense size=sm").tooltip("Toggle border")
+        pad = _style_get(t, "padding")
+        ui.button(icon="padding", on_click=lambda: set_style("padding", None if pad else "0.3em 0.6em")).props("flat dense size=sm").tooltip("Toggle padding")
+        ui.label("Align").classes("ce-tb-label")
+        cur_align = obj.align if kind == "place" else (_style_get(t, "text-align") or "")
+        for icon, val in [("format_align_left", "left"), ("format_align_center", "center"), ("format_align_right", "right")]:
+            ui.button(icon=icon, on_click=lambda e, v=val: set_text_align("" if cur_align == v else v)).props(
+                "flat dense size=sm" + (" color=primary" if cur_align == val else "")
+            )
+        ui.button(icon="edit", on_click=lambda: ui.run_javascript(f"window.colloquiumEditor.edit({_json({'kind': kind, 'index': i})})")).props("flat dense size=sm").tooltip("Edit text (Enter)")
+
     # --------------------------------------------------------- actions
     def set_html_inner(i, value):
         if value == st.slide.html_abs_refs()[i].inner:
@@ -775,16 +914,19 @@ def _editor_page(ui, app, st: EditorState):
         st.selection = None
         st.extra = []
         inspector.refresh()
+        toolbar.refresh()
         js_select()
 
     def select_html(i):
         st.selection = {"kind": "html", "index": i}
         inspector.refresh()
+        toolbar.refresh()
         js_select()
 
     def select_place(i):
         st.selection = {"kind": "place", "index": i}
         inspector.refresh()
+        toolbar.refresh()
         js_select()
 
     def set_place_text(i, value):
@@ -1005,11 +1147,14 @@ def _editor_page(ui, app, st: EditorState):
             st.selection = {"kind": sel.get("kind"), "index": int(sel.get("index", 0))}
             if sel.get("box"):
                 st.selection["box"] = sel["box"]
+            if sel.get("font"):
+                st.selection["font"] = sel["font"]
         st.extra = [
             {"kind": x.get("kind"), "index": int(x.get("index", 0))}
             for x in (sel.get("extra") or [])
         ]
         inspector.refresh()
+        toolbar.refresh()
         if sel.get("kind") == "html" and int(sel.get("index", 0)) >= len(st.slide.html_abs_refs()):
             notify("This element has no matching source; edit the raw markdown instead", "warning")
 
@@ -1052,6 +1197,7 @@ def _editor_page(ui, app, st: EditorState):
         st.commit()
         thumbs.refresh()
         inspector.refresh()
+        toolbar.refresh()
         if not ok:
             notify("Some elements could not be mapped to the source", "warning")
 
@@ -1068,6 +1214,14 @@ def _editor_page(ui, app, st: EditorState):
             redo()
         elif name == "paste":
             paste_clipboard()
+        elif name == "paste_inplace":
+            paste_clipboard(offset=False)
+        elif name == "refresh":
+            refresh_all()
+        elif name == "format":
+            items = selected_items(a)
+            if items:
+                apply_format(a.get("fmt", "bold"), items[0])
         elif name == "copy":
             copy_to_clipboard(selected_items(a))
         elif name == "duplicate":
@@ -1093,10 +1247,11 @@ def _editor_page(ui, app, st: EditorState):
         if blocks:
             notify(f"Copied {len(blocks)} element(s)")
 
-    def paste_clipboard():
+    def paste_clipboard(offset: bool = True):
         if not st.clipboard:
             notify("Clipboard is empty", "warning")
             return
+        dp, dpx = (2, 20) if offset else (0, 0)
 
         def apply():
             chunk = st.slide
@@ -1106,15 +1261,15 @@ def _editor_page(ui, app, st: EditorState):
                 if block.startswith("```place"):
                     idx = len(chunk.place_refs()) - 1
                     spec = chunk.get_place(idx)
-                    spec.x += 2
-                    spec.y += 2
+                    spec.x += dp
+                    spec.y += dp
                     chunk.set_place(idx, spec)
                     first = first or {"kind": "place", "index": idx}
                 else:
                     idx = len(chunk.html_abs_refs()) - 1
                     if idx >= 0:
                         r = chunk.html_abs_refs()[idx]
-                        chunk.set_html_abs_style(idx, left=f"{int((r.left_px or 0) + 20)}px", top=f"{int((r.top_px or 0) + 20)}px")
+                        chunk.set_html_abs_style(idx, left=f"{int((r.left_px or 0) + dpx)}px", top=f"{int((r.top_px or 0) + dpx)}px")
                         first = first or {"kind": "html", "index": idx}
             st.selection = first
             st.extra = []
@@ -1194,6 +1349,19 @@ def _editor_page(ui, app, st: EditorState):
             return refs[i].inner if i < len(refs) else None
         return None
 
+    def on_crop(e):
+        a = e.args or {}
+        i = int(a["index"])
+        refs = st.slide.place_refs()
+        if i >= len(refs):
+            return
+        spec = refs[i].spec
+        spec.x, spec.y, spec.w = float(a["x"]), float(a["y"]), float(a["w"])
+        spec.h = float(a["h"]) if a.get("h") is not None else None
+        spec.crop = [float(c) for c in a["crop"]] if a.get("crop") else None
+        st.selection = {"kind": "place", "index": i}
+        mutate(lambda: st.slide.set_place(i, spec))
+
     def on_edit_request(e):
         sel = e.args or {}
         value = edit_value(sel)
@@ -1248,6 +1416,7 @@ def _editor_page(ui, app, st: EditorState):
     )
     ui.on("ce-select", on_select)
     ui.on("ce-geometry", on_geometry)
+    ui.on("ce-crop", on_crop)
     ui.on("ce-command", on_command)
     ui.on("ce-ready", on_ready)
     ui.on("ce-edit-request", on_edit_request)
@@ -1278,7 +1447,21 @@ def _editor_page(ui, app, st: EditorState):
     # Render the dynamic panes now that every callback above is defined.
     with inspector_pane:
         inspector()
+    with toolbar_pane:
+        toolbar()
     ui.run_javascript("window.colloquiumEditor.attach('ce-preview')")
+
+
+def _hex(value: str | None) -> str | None:
+    """Return a #rrggbb colour for <input type=color>, or None if not representable."""
+    if not value:
+        return None
+    v = value.strip()
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+        return v.lower()
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", v):
+        return "#" + "".join(c * 2 for c in v[1:]).lower()
+    return None
 
 
 def _px_or_none(value: str | None) -> float | None:

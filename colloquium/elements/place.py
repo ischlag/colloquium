@@ -114,9 +114,9 @@ class PlaceSpec:
         if self.shape:
             lines.append(f"shape: {self.shape}")
         if self.fill:
-            lines.append(f"fill: \"{self.fill}\"")
+            lines.append(f"fill: {_quote(self.fill)}")
         if self.stroke:
-            lines.append(f"stroke: \"{self.stroke}\"")
+            lines.append(f"stroke: {_quote(self.stroke)}")
         if self.stroke_width is not None:
             lines.append(f"stroke_width: {_fmt(self.stroke_width, 2)}")
         if self.flip:
@@ -124,7 +124,7 @@ class PlaceSpec:
         if self.classes:
             lines.append(f"class: {' '.join(self.classes)}")
         if self.style:
-            lines.append(f"style: {self.style}")
+            lines.append(f"style: {_quote(self.style)}")
         if self.text:
             lines.append("text: |")
             lines.extend(f"  {line}" if line else "" for line in self.text.rstrip("\n").splitlines())
@@ -132,6 +132,11 @@ class PlaceSpec:
 
     def to_markdown(self) -> str:
         return "```place\n" + self.to_yaml() + "```"
+
+
+def _quote(value: str) -> str:
+    """Double-quote a YAML scalar (colours and CSS contain ``#`` and ``:``)."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _fmt(value: float, digits: int = 1) -> str:

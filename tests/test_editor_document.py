@@ -278,3 +278,17 @@ def test_convert_flow_image_to_place():
     assert chunk.get_cell(0) == "Intro.\n\nAfter."
     spec = chunk.get_place(0)
     assert (spec.src, spec.x, spec.y, spec.w) == ("images/fig.png", 10, 20, 40)
+
+
+def test_update_style_and_place_style_props():
+    from colloquium.editor.document import update_style
+
+    assert update_style("top: 1px; left: 2px", left="5px", color="red") == "top: 1px; left: 5px; color: red"
+    assert update_style("top: 1px; left: 2px", top=None) == "left: 2px"
+    assert update_style("", background_color="#fff") == "background-color: #fff"
+    doc = DeckDocument.from_text(DECK)
+    chunk = doc.slides[1]
+    chunk.set_place_style_props(0, color="#e4002b", border="1px solid #000")
+    assert chunk.get_place(0).style == "color: #e4002b; border: 1px solid #000"
+    chunk.set_place_style_props(0, color=None)
+    assert chunk.get_place(0).style == "border: 1px solid #000"
