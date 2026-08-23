@@ -170,3 +170,67 @@ def test_slide_operations():
     doc.insert_slide(1)
     assert doc.slides[1].get_title() == "New slide"
     assert len(parse_markdown(doc.to_text()).slides) == 4
+
+
+ANNO_DECK = """## Landscape
+
+<!-- class: landscape -->
+
+<div class="anno" style="top: 368px; left: 40px; max-width: 300px"><span class="anno-mark">*</span> Promised, never delivered.</div>
+<div class="anno" style="top: 615px; left: 396px; max-width: 330px">Restrictive licence.</div>
+
+<!-- columns: 2 -->
+
+### Closed
+
+OpenAI<br>
+xAI
+
+|||
+
+### Open
+
+DeepSeek
+"""
+
+
+def test_html_abs_refs_and_style_update():
+    doc = DeckDocument.from_text(ANNO_DECK)
+    chunk = doc.slides[0]
+    refs = chunk.html_abs_refs()
+    assert [(r.left_px, r.top_px, r.width_px) for r in refs] == [(40, 368, 300), (396, 615, 330)]
+    assert refs[0].classes == ["anno"]
+    chunk.set_html_abs_style(1, left="525px", top="472px", width="250px", **{"max-width": None})
+    assert 'style="top: 472px; left: 525px; width: 250px"' in chunk.text
+    chunk.set_html_abs_inner(0, "Edited <b>inner</b>")
+    assert chunk.html_abs_refs()[0].inner == "Edited <b>inner</b>"
+    # untouched parts are byte-identical
+    assert chunk.text.count("Restrictive licence.") == 1
+    assert "### Closed\n\nOpenAI<br>\nxAI" in chunk.text
+
+
+def test_cell_edit_hides_and_preserves_positioned_html():
+    doc = DeckDocument.from_text(ANNO_DECK)
+    chunk = doc.slides[0]
+    cell = chunk.get_cell(0)
+    assert "anno" not in cell
+    assert cell.startswith("<!-- class: landscape -->")
+    chunk.set_cell(0, cell.replace("xAI", "xAI (Grok)"))
+    expected = ANNO_DECK.replace("xAI\n", "xAI (Grok)\n").strip("\n")
+    assert chunk.text == expected
+    chunk.set_cell(0, chunk.get_cell(0))
+    assert chunk.text == expected
+
+
+def test_convert_html_abs_to_place():
+    doc = DeckDocument.from_text(ANNO_DECK)
+    chunk = doc.slides[0]
+    idx = chunk.convert_html_abs_to_place(1)
+    assert idx == 0
+    spec = chunk.get_place(0)
+    assert spec.classes == ["anno"]
+    assert spec.x == round(396 / 12.8, 1) and spec.y == round(615 / 7.2, 1)
+    assert spec.w == round(330 / 12.8, 1)
+    assert spec.text.strip() == "Restrictive licence."
+    assert len(chunk.html_abs_refs()) == 1
+    assert len(parse_markdown(doc.to_text()).slides) == 1

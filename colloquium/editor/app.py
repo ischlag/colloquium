@@ -338,7 +338,7 @@ def _editor_page(ui, app, st: EditorState):
                     pos_label = ui.label()
                     ui.button(icon="chevron_right", on_click=lambda: goto(st.index + 1)).props("flat dense color=white")
                     ui.space()
-                    ui.label("drag to move · handles to resize · shift = free aspect · alt = no snap · arrows nudge · del removes").classes("text-gray-400")
+                    ui.label("click selects · double-click (or Enter) edits in place · drag moves · handles resize · shift = free aspect · alt = no snap · arrows nudge · Del removes placed element").classes("text-gray-400")
 
             with ui.element("div").classes("ce-inspector p-3") as inspector_pane:
                 @ui.refreshable
@@ -347,6 +347,8 @@ def _editor_page(ui, app, st: EditorState):
                     sel = st.selection
                     if sel and sel.get("kind") == "place":
                         _place_inspector(sel["index"])
+                    elif sel and sel.get("kind") == "html":
+                        _html_inspector(sel["index"])
                     elif sel and sel.get("kind") in {"cell", "content"}:
                         _cell_inspector(sel.get("index", 0))
                     elif sel and sel.get("kind") == "title":
@@ -425,6 +427,12 @@ def _editor_page(ui, app, st: EditorState):
                 "blur", lambda e, i=i: set_cell(i, e.sender.value)
             ).on("keydown.ctrl.enter", lambda e, i=i: set_cell(i, e.sender.value))
 
+        hrefs = chunk.html_abs_refs()
+        if hrefs:
+            ui.label("Positioned HTML elements").classes("ce-section")
+            for r in hrefs:
+                preview = re.sub(r"<[^>]+>", "", r.inner).strip()[:40]
+                ui.item(f"{r.index + 1}. <{r.tag}> {preview}", on_click=lambda r=r: select_html(r.index)).props("clickable dense")
         refs = chunk.place_refs()
         if refs:
             ui.label("Placed elements").classes("ce-section")
@@ -524,7 +532,80 @@ def _editor_page(ui, app, st: EditorState):
             ui.button("Delete", icon="delete", on_click=lambda: delete_place(i)).props("flat dense color=negative")
             ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
 
+    def _html_inspector(i: int):
+        chunk = st.slide
+        refs = chunk.html_abs_refs()
+        if i >= len(refs):
+            select_none()
+            return
+        ref = refs[i]
+        ui.label(f"HTML element {i + 1} (<{ref.tag}{(' .' + ' .'.join(ref.classes)) if ref.classes else ''}>)").classes("ce-section")
+        ui.label("Positioned with inline px styles (1280x720 slide space).").classes("text-xs text-gray-400")
+
+        def pxnum(label, key, value):
+            def on_change(e, key=key):
+                v = e.value
+                cur = ref.get(key)
+                new = None if v in (None, "") else f"{int(float(v))}px"
+                if new == cur:
+                    return
+                props = {key: new}
+                if key == "width" and new:
+                    props["max-width"] = None
+                mutate(lambda: chunk.set_html_abs_style(i, **props), reload_frame=False)
+
+            ui.number(label=label, value=value, step=1, format="%.0f", on_change=on_change).props("dense outlined").classes("w-full")
+
+        with ui.row().classes("w-full gap-2 no-wrap"):
+            with ui.column().classes("flex-1 gap-0"):
+                pxnum("left px", "left", ref.left_px)
+            with ui.column().classes("flex-1 gap-0"):
+                pxnum("top px", "top", ref.top_px)
+        with ui.row().classes("w-full gap-2 no-wrap"):
+            with ui.column().classes("flex-1 gap-0"):
+                pxnum("width px", "width", ref.width_px)
+            with ui.column().classes("flex-1 gap-0"):
+                pxnum("height px", "height", _px_or_none(ref.get("height")))
+        ui.label("Inner HTML").classes("ce-section")
+        ui.textarea(value=ref.inner).props("dense outlined autogrow input-class=font-mono input-style=font-size:12px").classes("w-full").on(
+            "blur", lambda e: set_html_inner(i, e.sender.value)
+        ).on("keydown.ctrl.enter", lambda e: set_html_inner(i, e.sender.value))
+        ui.label("blur or Ctrl+Enter applies; double-click the element to edit on the canvas").classes("text-xs text-gray-400")
+        ui.input(label="Full inline style", value=ref.style).props("dense outlined").classes("w-full").on(
+            "blur", lambda e: set_html_style_raw(i, e.sender.value)
+        )
+        with ui.row().classes("gap-1 mt-2"):
+            ui.button("Convert to place block", icon="swap_horiz", on_click=lambda: convert_html(i)).props("flat dense").tooltip(
+                "Rewrites this element as a ```place block (percent coordinates, editable like any placed text)"
+            )
+            ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
+
     # --------------------------------------------------------- actions
+    def set_html_inner(i, value):
+        if value == st.slide.html_abs_refs()[i].inner:
+            return
+        mutate(lambda: st.slide.set_html_abs_inner(i, value))
+
+    def set_html_style_raw(i, value):
+        ref = st.slide.html_abs_refs()[i]
+        if value.strip() == ref.style:
+            return
+
+        def apply():
+            chunk = st.slide
+            r = chunk.html_abs_refs()[i]
+            tag_text = chunk.text[r.start : r.end].replace(f'style="{r.style}"', f'style="{value.strip()}"', 1)
+            chunk.text = chunk.text[: r.start] + tag_text + chunk.text[r.end :]
+
+        mutate(apply)
+
+    def convert_html(i):
+        def apply():
+            idx = st.slide.convert_html_abs_to_place(i)
+            st.selection = {"kind": "place", "index": idx}
+
+        mutate(apply)
+
     def set_directive(key, value):
         cur = st.slide.get_directive(key) or ""
         if (value or "").strip() == cur:
@@ -547,6 +628,11 @@ def _editor_page(ui, app, st: EditorState):
 
     def select_none():
         st.selection = None
+        inspector.refresh()
+        js_select()
+
+    def select_html(i):
+        st.selection = {"kind": "html", "index": i}
         inspector.refresh()
         js_select()
 
@@ -759,6 +845,8 @@ def _editor_page(ui, app, st: EditorState):
         else:
             st.selection = {"kind": sel.get("kind"), "index": int(sel.get("index", 0))}
         inspector.refresh()
+        if sel.get("kind") == "html" and int(sel.get("index", 0)) >= len(st.slide.html_abs_refs()):
+            notify("This element has no matching source; edit the raw markdown instead", "warning")
 
     def on_place_update(e):
         a = e.args or {}
@@ -780,6 +868,65 @@ def _editor_page(ui, app, st: EditorState):
     def on_place_delete(e):
         delete_place(int((e.args or {}).get("index", 0)))
 
+    def on_html_update(e):
+        a = e.args or {}
+        i = int(a["index"])
+        refs = st.slide.html_abs_refs()
+        if i >= len(refs):
+            notify("Cannot map this element to the markdown source", "warning")
+            return
+        props = {"left": f"{int(a['left'])}px", "top": f"{int(a['top'])}px"}
+        if a.get("width") is not None:
+            props["width"] = f"{int(a['width'])}px"
+            props["max-width"] = None
+        if a.get("height") is not None:
+            props["height"] = f"{int(a['height'])}px"
+        st.selection = {"kind": "html", "index": i}
+        st.snapshot()
+        st.slide.set_html_abs_style(i, **props)
+        st.commit()
+        thumbs.refresh()
+        inspector.refresh()
+
+    def edit_value(sel) -> str | None:
+        kind, i = sel.get("kind"), int(sel.get("index", 0))
+        chunk = st.slide
+        if kind == "title":
+            return chunk.get_title()
+        if kind in {"cell", "content"}:
+            spans = chunk.cell_spans()
+            return chunk.get_cell(i if i < len(spans) else 0)
+        if kind == "place":
+            refs = chunk.place_refs()
+            if i < len(refs) and refs[i].spec.kind == "text":
+                return refs[i].spec.text.rstrip("\n")
+            return None
+        if kind == "html":
+            refs = chunk.html_abs_refs()
+            return refs[i].inner if i < len(refs) else None
+        return None
+
+    def on_edit_request(e):
+        sel = e.args or {}
+        value = edit_value(sel)
+        if value is None:
+            notify("Nothing editable here", "warning")
+            return
+        ui.run_javascript(f"window.colloquiumEditor.openEditor({_json(sel)}, {_json(value)})")
+
+    def on_edit_commit(e):
+        a = e.args or {}
+        kind, i, value = a.get("kind"), int(a.get("index", 0)), a.get("value", "")
+        if kind == "title":
+            set_title(value)
+        elif kind in {"cell", "content"}:
+            spans = st.slide.cell_spans()
+            set_cell(i if i < len(spans) else 0, value)
+        elif kind == "place":
+            set_place_text(i, value)
+        elif kind == "html":
+            set_html_inner(i, value)
+
     def on_ready(e):
         js_select()
 
@@ -787,6 +934,9 @@ def _editor_page(ui, app, st: EditorState):
     ui.on("ce-place-update", on_place_update)
     ui.on("ce-place-delete", on_place_delete)
     ui.on("ce-ready", on_ready)
+    ui.on("ce-html-update", on_html_update)
+    ui.on("ce-edit-request", on_edit_request)
+    ui.on("ce-edit-commit", on_edit_commit)
 
     def on_key(e):
         if not e.action.keydown:
@@ -816,6 +966,11 @@ def _editor_page(ui, app, st: EditorState):
     with inspector_pane:
         inspector()
     ui.run_javascript("window.colloquiumEditor.attach('ce-preview')")
+
+
+def _px_or_none(value: str | None) -> float | None:
+    m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*px\s*", value or "")
+    return float(m.group(1)) if m else None
 
 
 def _json(obj) -> str:

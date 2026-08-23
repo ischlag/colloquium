@@ -176,19 +176,54 @@ class SlideChunk:
         spans.append((start + pos, end))
         return spans
 
+    def _kept_spans(self, text: str) -> list[tuple[int, int]]:
+        """Spans of blocks the cell editor hides but must preserve.
+
+        Place blocks and px-positioned HTML elements have their own editing
+        paths; cell text editing works on everything else.
+        """
+        spans = [(r.start, r.end) for r in self._place_refs_in(text)]
+        masked = text
+        for a, b in spans:
+            masked = masked[:a] + " " * (b - a) + masked[b:]
+        spans += [(m.start(), m.end()) for m in _HTML_ABS_RE.finditer(masked)]
+        return sorted(spans)
+
     def get_cell(self, i: int) -> str:
         s, e = self.cell_spans()[i]
-        return _strip_place_blocks(self.text[s:e]).strip("\n")
+        text = self.text[s:e]
+        for a, b in reversed(self._kept_spans(text)):
+            text = text[:a] + text[b:]
+        return re.sub(r"\n{3,}", "\n\n", text).strip("\n")
 
     def set_cell(self, i: int, value: str) -> None:
         spans = self.cell_spans()
         s, e = spans[i]
         old = self.text[s:e]
-        # keep the place blocks that live in this cell
-        kept = "\n\n".join(self.text[s + r.start : s + r.end].strip("\n") for r in self._place_refs_in(old))
+        # keep the place blocks / positioned HTML that live in this cell
+        kept_spans = self._kept_spans(old)
+        kept = "\n".join(old[a:b].strip("\n") for a, b in kept_spans)
         value = value.strip("\n")
         if kept:
-            value = f"{value}\n\n{kept}" if value else kept
+            # Kept blocks stay at the top when they were only preceded by
+            # directives/blank lines (the common "annotations first" layout),
+            # otherwise they go to the end of the cell.
+            prefix = old[: kept_spans[0][0]]
+            prefix_is_head = not _DIRECTIVE_RE.sub("", prefix).strip()
+            if prefix_is_head and value:
+                # Re-emit as many leading directives as originally preceded
+                # the kept blocks, then the kept blocks, then the rest.
+                n_head = len(_DIRECTIVE_RE.findall(prefix))
+                cut = 0
+                for k, m in enumerate(_DIRECTIVE_RE.finditer(value)):
+                    if k >= n_head or value[cut:m.start()].strip():
+                        break
+                    cut = m.end()
+                head = value[:cut].strip("\n")
+                rest = value[cut:].strip("\n")
+                value = "\n\n".join(x for x in [head, kept, rest] if x)
+            else:
+                value = f"{value}\n\n{kept}" if value else kept
         lead = "\n" if s > 0 and not old.startswith("\n") else ("\n\n" if s > 0 else "")
         trail = "\n\n" if e < len(self.text) else ""
         if s == 0:
@@ -216,6 +251,67 @@ class SlideChunk:
         trail = "\n" if raw.endswith("\n") else ""
         self.text = self.text[: ref.start] + block + trail + self.text[ref.end :]
 
+    # ----- raw absolutely positioned HTML ---------------------------------------
+    def html_abs_refs(self) -> list[HtmlAbsRef]:
+        refs = []
+        masked = self.text
+        for r in self._place_refs_in(self.text):
+            masked = masked[: r.start] + " " * (r.end - r.start) + masked[r.end :]
+        for i, m in enumerate(_HTML_ABS_RE.finditer(masked)):
+            refs.append(
+                HtmlAbsRef(
+                    i, m.start(), m.end(), m.group("tag"), m.group("attrs"), m.group("style"),
+                    m.group("inner"), m.start("inner"), m.end("inner"),
+                )
+            )
+        return refs
+
+    def set_html_abs_style(self, i: int, **props: str | None) -> None:
+        """Update inline style declarations (value None removes the key)."""
+        ref = self.html_abs_refs()[i]
+        # keep original order for untouched keys, append new keys at the end
+        order = [k for k, _ in ref.decls]
+        out: list[tuple[str, str]] = []
+        for k, v in ref.decls:
+            if k in props:
+                if props[k] is not None:
+                    out.append((k, props[k]))
+            else:
+                out.append((k, v))
+        for k, v in props.items():
+            if k not in order and v is not None:
+                out.append((k, v))
+        new_style = format_inline_style(out)
+        # replace only the style attribute value inside the opening tag
+        tag_text = self.text[ref.start : ref.end]
+        tag_text = tag_text.replace(f'style="{ref.style}"', f'style="{new_style}"', 1)
+        self.text = self.text[: ref.start] + tag_text + self.text[ref.end :]
+
+    def set_html_abs_inner(self, i: int, inner: str) -> None:
+        ref = self.html_abs_refs()[i]
+        self.text = self.text[: ref.inner_start] + inner + self.text[ref.inner_end :]
+
+    def convert_html_abs_to_place(self, i: int) -> int:
+        """Replace a px-positioned HTML element with an equivalent place block."""
+        ref = self.html_abs_refs()[i]
+        spec = place.PlaceSpec(
+            x=round((ref.left_px or 0) / 12.8, 1),
+            y=round((ref.top_px or 0) / 7.2, 1),
+            w=round(ref.width_px / 12.8, 1) if ref.width_px else None,
+            text=ref.inner.strip() + "\n",
+            classes=ref.classes,
+        )
+        keep = [
+            (k, v) for k, v in ref.decls
+            if k not in {"position", "top", "left", "width", "max-width"}
+        ]
+        if keep:
+            spec.style = format_inline_style(keep)
+        before = self.text[: ref.start].rstrip(" \t")
+        after = self.text[ref.end :]
+        self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + spec.to_markdown() + "\n" + after.lstrip(" \t")).strip("\n")
+        return len(self.place_refs()) - 1
+
     def add_place(self, spec: place.PlaceSpec) -> int:
         refs = self.place_refs()
         self.text = self.text.rstrip("\n") + "\n\n" + spec.to_markdown()
@@ -226,8 +322,70 @@ class SlideChunk:
         self.text = re.sub(r"\n{3,}", "\n\n", self.text[: ref.start] + self.text[ref.end :]).strip("\n")
 
 
-def _strip_place_blocks(text: str) -> str:
-    return re.sub(r"\n{3,}", "\n\n", place.PLACE_FENCE_RE.sub("", text))
+# Raw HTML elements positioned with inline top/left (e.g. hand-written
+# annotation callouts). Non-nested only: the inner content must not contain
+# another tag of the same name.
+_HTML_ABS_RE = re.compile(
+    r"<(?P<tag>div|span|p)\b(?P<attrs>[^>]*\bstyle=\"(?P<style>[^\"]*\b(?:top|left)\s*:[^\"]*)\"[^>]*)>"
+    r"(?P<inner>(?:(?!<(?P=tag)\b).)*?)</(?P=tag)>",
+    re.DOTALL | re.IGNORECASE,
+)
+_CSS_DECL_RE = re.compile(r"\s*([a-zA-Z-]+)\s*:\s*([^;]*?)\s*(?:;|$)")
+
+
+def parse_inline_style(style: str) -> list[tuple[str, str]]:
+    return [(k.lower(), v) for k, v in _CSS_DECL_RE.findall(style) if k]
+
+
+def format_inline_style(decls: list[tuple[str, str]]) -> str:
+    return "; ".join(f"{k}: {v}" for k, v in decls)
+
+
+def _px(value: str) -> float | None:
+    m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*px\s*", value or "")
+    return float(m.group(1)) if m else None
+
+
+@dataclass
+class HtmlAbsRef:
+    """A raw HTML element with inline top/left, and its source span."""
+
+    index: int
+    start: int
+    end: int
+    tag: str
+    attrs: str
+    style: str
+    inner: str
+    inner_start: int
+    inner_end: int
+
+    @property
+    def classes(self) -> list[str]:
+        m = re.search(r'\bclass="([^"]*)"', self.attrs)
+        return m.group(1).split() if m else []
+
+    @property
+    def decls(self) -> list[tuple[str, str]]:
+        return parse_inline_style(self.style)
+
+    def get(self, key: str) -> str | None:
+        for k, v in self.decls:
+            if k == key:
+                return v
+        return None
+
+    @property
+    def left_px(self) -> float | None:
+        return _px(self.get("left") or "")
+
+    @property
+    def top_px(self) -> float | None:
+        return _px(self.get("top") or "")
+
+    @property
+    def width_px(self) -> float | None:
+        return _px(self.get("width") or "") or _px(self.get("max-width") or "")
 
 
 @dataclass
