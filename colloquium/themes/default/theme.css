@@ -75,6 +75,68 @@ html, body {
     display: flex;
 }
 
+/* ===== Free placement (place blocks) ===== */
+/* The layer covers the whole slide so x/y/w/h percentages are slide-relative,
+   independent of slide padding. pointer-events pass through empty areas. */
+.slide .colloquium-place-layer {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
+.slide .colloquium-place {
+    position: absolute;
+    box-sizing: border-box;
+    pointer-events: auto;
+}
+
+.slide .colloquium-place--image {
+    overflow: hidden;
+}
+
+.slide .colloquium-place--image img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    max-width: none;
+    object-fit: fill;
+}
+
+/* Cropped images: the img is oversized and offset inside the box so only
+   the crop rectangle of the original is visible. */
+.slide .colloquium-place--image[data-crop] {
+    position: absolute;
+}
+
+.slide .colloquium-place--image[data-crop] img {
+    position: absolute;
+}
+
+.slide .colloquium-place--text > :first-child {
+    margin-top: 0;
+}
+
+.slide .colloquium-place--text > :last-child {
+    margin-bottom: 0;
+}
+
+.slide .colloquium-place--align-center {
+    text-align: center;
+}
+
+.slide .colloquium-place--align-right {
+    text-align: right;
+}
+
+.slide .colloquium-place--error {
+    color: #c0392b;
+    font-size: 0.7em;
+    background: rgba(255, 255, 255, 0.85);
+    padding: 0.3em 0.6em;
+}
+
 /* ===== Typography ===== */
 .slide h1 {
     font-family: var(--colloquium-font-heading);
