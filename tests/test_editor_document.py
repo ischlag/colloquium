@@ -234,3 +234,47 @@ def test_convert_html_abs_to_place():
     assert spec.text.strip() == "Restrictive licence."
     assert len(chunk.html_abs_refs()) == 1
     assert len(parse_markdown(doc.to_text()).slides) == 1
+
+
+def test_reorder_place_and_html():
+    text = "## T\n\n```place\nx: 1\ny: 1\ntext: |\n  A\n```\n\nmiddle\n\n```place\nx: 2\ny: 2\ntext: |\n  B\n```\n\n```place\nx: 3\ny: 3\ntext: |\n  C\n```"
+    chunk = SlideChunk(text)
+    assert chunk.reorder_place(0, 2) == 2
+    assert [r.spec.text.strip() for r in chunk.place_refs()] == ["B", "C", "A"]
+    assert "\n\nmiddle\n\n" in chunk.text
+    assert chunk.reorder_place(2, 0) == 0
+    assert chunk.text == text
+    doc = DeckDocument.from_text(ANNO_DECK)
+    c = doc.slides[0]
+    c.reorder_html_abs(0, 1)
+    refs = c.html_abs_refs()
+    assert refs[0].inner == "Restrictive licence." and refs[1].inner.endswith("never delivered.")
+    c.reorder_html_abs(1, 0)
+    assert c.text == ANNO_DECK.strip("\n")
+
+
+def test_duplicate_and_paste():
+    doc = DeckDocument.from_text(DECK)
+    chunk = doc.slides[1]
+    j = chunk.duplicate_place(0)
+    assert j == 1
+    refs = chunk.place_refs()
+    assert len(refs) == 2 and refs[1].spec.x == 7 and refs[1].spec.y == 82
+    assert chunk.get_cell(0) == "Left text." and chunk.get_cell(1).startswith("Right text.")
+    c = DeckDocument.from_text(ANNO_DECK).slides[0]
+    j = c.duplicate_html_abs(0)
+    refs = c.html_abs_refs()
+    assert j == 1 and len(refs) == 3 and (refs[1].left_px, refs[1].top_px) == (60, 388)
+    c.append_raw(refs[0].inner and '<div class="anno" style="top: 1px; left: 2px">pasted</div>')
+    assert c.html_abs_refs()[-1].inner == "pasted"
+
+
+def test_convert_flow_image_to_place():
+    chunk = SlideChunk("## T\n\nIntro.\n\n![A figure](images/fig.png)\n\nAfter.")
+    assert [r[2] for r in chunk.flow_image_refs()] == ["images/fig.png"]
+    idx = chunk.convert_flow_image_to_place(0, 10, 20, 40)
+    assert idx == 0
+    assert "![A figure]" not in chunk.text
+    assert chunk.get_cell(0) == "Intro.\n\nAfter."
+    spec = chunk.get_place(0)
+    assert (spec.src, spec.x, spec.y, spec.w) == ("images/fig.png", 10, 20, 40)

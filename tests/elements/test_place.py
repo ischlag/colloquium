@@ -121,3 +121,20 @@ Right column.
     assert "colloquium-grid" in html
     assert "```place" not in html
     assert "language-place" not in html
+
+
+def test_shapes_render_and_round_trip():
+    spec = place.parse_spec('x: 10\ny: 10\nw: 30\nh: 20\nshape: rounded\nfill: "#ffe"\nstroke: "#e4002b"\nstroke_width: 2\ntext: |\n  **Hi**\n')
+    assert spec.kind == "shape"
+    html = place.render_spec(spec, 0)
+    assert "colloquium-place--shape" in html
+    assert "background: #ffe" in html and "border: 2px solid #e4002b" in html and "border-radius: 16px" in html
+    assert "<strong>Hi</strong>" in html
+    again = place.parse_spec(spec.to_yaml())
+    assert (again.shape, again.fill, again.stroke, again.stroke_width) == ("rounded", "#ffe", "#e4002b", 2)
+
+    arrow = place.parse_spec("x: 0\ny: 0\nw: 20\nh: 10\nshape: arrow\nflip: true\n")
+    html = place.render_spec(arrow, 1)
+    assert "<line" in html and 'y1="100%"' in html and "marker-end" in html
+    assert place.render_spec(arrow, 1) == html  # deterministic ids
+    assert place.parse_spec(arrow.to_yaml()).flip is True

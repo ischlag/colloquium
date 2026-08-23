@@ -28,6 +28,11 @@ Unlike the other elements, place blocks are extracted from the slide source
 direct child of the slide, so they never interfere with column/row layout
 and their coordinates are always slide-relative.
 
+Shapes: ``shape: rect | rounded | ellipse | line | arrow`` with ``fill``,
+``stroke``, ``stroke_width`` (px) and optional ``text`` centred inside. Lines
+run from the box's top-left to bottom-right (``flip: true`` for bottom-left
+to top-right); a horizontal line is simply a box with ``h`` near 0.
+
 Cropping is non-destructive: the original file is referenced unchanged and the
 crop rectangle only offsets/scales the image inside an overflow-hidden box.
 """
@@ -51,6 +56,7 @@ PLACE_FENCE_RE = re.compile(
 _block_md = create_base_md()
 
 _ALIGNS = {"left", "center", "right"}
+_SHAPES = {"rect", "rounded", "ellipse", "line", "arrow"}
 
 
 @dataclass
@@ -70,12 +76,21 @@ class PlaceSpec:
     rotate: float | None = None
     classes: list[str] = field(default_factory=list)
     style: str = ""
+    shape: str = ""          # rect | rounded | ellipse | line | arrow
+    fill: str = ""
+    stroke: str = ""
+    stroke_width: float | None = None
+    flip: bool = False       # line/arrow: bottom-left to top-right instead of top-left to bottom-right
     raw: str = ""
     error: str = ""
 
     @property
     def kind(self) -> str:
-        return "image" if self.src else "text"
+        if self.src:
+            return "image"
+        if self.shape:
+            return "shape"
+        return "text"
 
     def to_yaml(self) -> str:
         """Serialize back to the YAML body of a ```place block."""
@@ -96,6 +111,16 @@ class PlaceSpec:
             lines.append(f"z: {self.z}")
         if self.rotate is not None:
             lines.append(f"rotate: {_fmt(self.rotate)}")
+        if self.shape:
+            lines.append(f"shape: {self.shape}")
+        if self.fill:
+            lines.append(f"fill: \"{self.fill}\"")
+        if self.stroke:
+            lines.append(f"stroke: \"{self.stroke}\"")
+        if self.stroke_width is not None:
+            lines.append(f"stroke_width: {_fmt(self.stroke_width, 2)}")
+        if self.flip:
+            lines.append("flip: true")
         if self.classes:
             lines.append(f"class: {' '.join(self.classes)}")
         if self.style:
@@ -155,6 +180,12 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
     classes = data.get("class", "")
     spec.classes = str(classes).split() if classes else []
     spec.style = str(data.get("style", "") or "").strip()
+    shape = str(data.get("shape", "") or "").strip().lower()
+    spec.shape = shape if shape in _SHAPES else ""
+    spec.fill = str(data.get("fill", "") or "").strip()
+    spec.stroke = str(data.get("stroke", "") or "").strip()
+    spec.stroke_width = _num(data.get("stroke_width"))
+    spec.flip = bool(data.get("flip", False))
 
     crop = data.get("crop")
     if isinstance(crop, (list, tuple)) and len(crop) == 4:
@@ -174,8 +205,8 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
             except ValueError:
                 pass
 
-    if not spec.src and not spec.text.strip():
-        spec.error = "Place block needs src or text"
+    if not spec.src and not spec.text.strip() and not spec.shape:
+        spec.error = "Place block needs src, text or shape"
     return spec
 
 
@@ -204,6 +235,15 @@ def _box_style(spec: PlaceSpec) -> str:
         parts.append(f"transform: rotate({_fmt(spec.rotate, 2)}deg)")
     if spec.size is not None and spec.size > 0:
         parts.append(f"font-size: {_fmt(spec.size, 3)}em")
+    if spec.shape in {"rect", "rounded", "ellipse"}:
+        sw = spec.stroke_width if spec.stroke_width is not None else 3
+        parts.append(f"background: {spec.fill or 'rgba(30, 120, 255, 0.15)'}")
+        if sw > 0:
+            parts.append(f"border: {_fmt(sw, 2)}px solid {spec.stroke or '#1e78ff'}")
+        if spec.shape == "rounded":
+            parts.append("border-radius: 16px")
+        elif spec.shape == "ellipse":
+            parts.append("border-radius: 50%")
     if spec.style:
         parts.append(spec.style.rstrip(";"))
     return "; ".join(parts)
@@ -249,8 +289,39 @@ def render_spec(spec: PlaceSpec, index: int, md=None) -> str:
         )
 
     renderer = md or _block_md
-    body = renderer.render(spec.text).strip()
+    body = renderer.render(spec.text).strip() if spec.text.strip() else ""
+    if spec.kind == "shape":
+        return f"<div {attrs}>{_render_shape(spec)}{body}</div>"
     return f"<div {attrs}>{body}</div>"
+
+
+def _render_shape(spec: PlaceSpec) -> str:
+    """Shape background as an SVG that stretches with the box."""
+    fill = html_module.escape(spec.fill or ("none" if spec.shape in {"line", "arrow"} else "rgba(30, 120, 255, 0.15)"), quote=True)
+    stroke = html_module.escape(spec.stroke or "#1e78ff", quote=True)
+    sw = spec.stroke_width if spec.stroke_width is not None else 3
+    if spec.shape in {"line", "arrow"}:
+        # No viewBox: user units are px, so the stroke and arrowhead keep their
+        # size whatever the (possibly very flat) box is stretched to.
+        y1, y2 = ("100%", "0%") if spec.flip else ("0%", "100%")
+        marker = ""
+        marker_attr = ""
+        if spec.shape == "arrow":
+            mid = "ce-arrow-" + re.sub(r"[^a-z0-9]", "", f"{stroke}{_fmt(sw, 2)}".lower())
+            size = _fmt(6 + 3 * sw, 2)
+            marker = (
+                f'<defs><marker id="{mid}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="{size}" '
+                f'markerHeight="{size}" markerUnits="userSpaceOnUse" orient="auto-start-reverse">'
+                f'<path d="M 0 0 L 10 5 L 0 10 z" fill="{stroke}"/></marker></defs>'
+            )
+            marker_attr = f' marker-end="url(#{mid})"'
+        return (
+            f'<svg class="colloquium-shape" overflow="visible">{marker}'
+            f'<line x1="0%" y1="{y1}" x2="100%" y2="{y2}" stroke="{stroke}" stroke-width="{_fmt(sw, 2)}" '
+            f'stroke-linecap="round"{marker_attr}/></svg>'
+        )
+    # rect / rounded / ellipse are plain CSS on the box (see _box_style)
+    return ""
 
 
 def render_layer(specs: list[PlaceSpec], md=None) -> str:

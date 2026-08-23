@@ -220,6 +220,29 @@ text: |
   - edited visually with `colloquium edit`
 ```
 
+```place
+x: 4
+y: 40
+w: 40
+h: 16
+shape: rounded
+fill: "rgba(228, 0, 43, 0.08)"
+stroke: "#e4002b"
+stroke_width: 2
+size: 0.8
+text: |
+  Shapes: rect, rounded, ellipse, line, arrow
+```
+
+```place
+x: 45
+y: 48
+w: 6
+h: 0.1
+shape: arrow
+stroke: "#e4002b"
+```
+
 ---
 
 <!-- columns: 2 -->

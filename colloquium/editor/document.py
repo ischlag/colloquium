@@ -312,6 +312,95 @@ class SlideChunk:
         self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + spec.to_markdown() + "\n" + after.lstrip(" \t")).strip("\n")
         return len(self.place_refs()) - 1
 
+    # ----- stacking order (later in source = drawn on top) ----------------------
+    def _swap_spans(self, a: tuple[int, int], b: tuple[int, int]) -> None:
+        """Swap two non-overlapping source spans, keeping everything between."""
+        (a0, a1), (b0, b1) = sorted([a, b])
+        t = self.text
+        # spans may include a trailing newline; never move those
+        while a1 > a0 and t[a1 - 1] == "\n":
+            a1 -= 1
+        while b1 > b0 and t[b1 - 1] == "\n":
+            b1 -= 1
+        self.text = t[:a0] + t[b0:b1] + t[a1:b0] + t[a0:a1] + t[b1:]
+
+    def reorder_place(self, i: int, new_index: int) -> int:
+        """Move place block *i* to position *new_index* among place blocks."""
+        refs = self.place_refs()
+        new_index = max(0, min(new_index, len(refs) - 1))
+        step = 1 if new_index > i else -1
+        while i != new_index:
+            refs = self.place_refs()
+            self._swap_spans((refs[i].start, refs[i].end), (refs[i + step].start, refs[i + step].end))
+            i += step
+        return i
+
+    def reorder_html_abs(self, i: int, new_index: int) -> int:
+        refs = self.html_abs_refs()
+        new_index = max(0, min(new_index, len(refs) - 1))
+        step = 1 if new_index > i else -1
+        while i != new_index:
+            refs = self.html_abs_refs()
+            self._swap_spans((refs[i].start, refs[i].end), (refs[i + step].start, refs[i + step].end))
+            i += step
+        return i
+
+    def duplicate_place(self, i: int, dx: float = 2.0, dy: float = 2.0) -> int:
+        ref = self.place_refs()[i]
+        spec = place.parse_spec(ref.spec.to_yaml())
+        spec.x += dx
+        spec.y += dy
+        block = spec.to_markdown()
+        end = ref.end
+        while end > ref.start and self.text[end - 1] == "\n":
+            end -= 1
+        self.text = self.text[:end] + "\n\n" + block + self.text[end:]
+        return i + 1
+
+    def duplicate_html_abs(self, i: int, dx: float = 20, dy: float = 20) -> int:
+        ref = self.html_abs_refs()[i]
+        raw = self.text[ref.start : ref.end]
+        self.text = self.text[: ref.end] + "\n" + raw + self.text[ref.end :]
+        j = i + 1
+        self.set_html_abs_style(
+            j,
+            left=f"{int((ref.left_px or 0) + dx)}px",
+            top=f"{int((ref.top_px or 0) + dy)}px",
+        )
+        return j
+
+    def append_raw(self, block: str) -> None:
+        """Append a raw block (place block or HTML) to the end of the slide."""
+        self.text = self.text.rstrip("\n") + "\n\n" + block.strip("\n")
+
+    # ----- inline markdown / html images in the flow ---------------------------
+    def flow_image_refs(self) -> list[tuple[int, int, str]]:
+        """(start, end, src) of ``![alt](src)`` and ``<img src>`` outside place blocks."""
+        masked = self.text
+        for r in self._place_refs_in(self.text):
+            masked = masked[: r.start] + " " * (r.end - r.start) + masked[r.end :]
+        found = []
+        for m in _MD_IMAGE_RE.finditer(masked):
+            found.append((m.start(), m.end(), m.group("src")))
+        for m in _HTML_IMG_RE.finditer(masked):
+            found.append((m.start(), m.end(), m.group("src")))
+        return sorted(found)
+
+    def convert_flow_image_to_place(self, k: int, x: float, y: float, w: float) -> int:
+        start, end, src = self.flow_image_refs()[k]
+        # drop a figure/paragraph wrapper line if the image was alone on it
+        line_start = self.text.rfind("\n", 0, start) + 1
+        line_end = self.text.find("\n", end)
+        line_end = len(self.text) if line_end == -1 else line_end
+        line = self.text[line_start:line_end]
+        if line.strip() == self.text[start:end].strip():
+            start, end = line_start, line_end
+        spec = place.PlaceSpec(x=round(x, 1), y=round(y, 1), w=round(w, 1), src=src)
+        before = self.text[:start].rstrip(" \t")
+        after = self.text[end:]
+        self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + after.lstrip("\n")).strip("\n")
+        return self.add_place(spec)
+
     def add_place(self, spec: place.PlaceSpec) -> int:
         refs = self.place_refs()
         self.text = self.text.rstrip("\n") + "\n\n" + spec.to_markdown()
@@ -330,6 +419,8 @@ _HTML_ABS_RE = re.compile(
     r"(?P<inner>(?:(?!<(?P=tag)\b).)*?)</(?P=tag)>",
     re.DOTALL | re.IGNORECASE,
 )
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((?P<src>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=\"(?P<src>[^\"]+)\"[^>]*>", re.IGNORECASE)
 _CSS_DECL_RE = re.compile(r"\s*([a-zA-Z-]+)\s*:\s*([^;]*?)\s*(?:;|$)")
 
 
