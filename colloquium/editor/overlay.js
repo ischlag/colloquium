@@ -265,7 +265,7 @@
   function applySelection() {
     clearFlowSelection();
     hideBox();
-    if (!state.slide) return;
+    if (!state.slide || state.crop) return;
     const sel = state.selection;
     if (!sel) return;
     if (isMovable(sel) || sel.kind === "img") {
@@ -356,7 +356,13 @@
   }
 
   function onClick(e) {
-    if (state.crop) { e.preventDefault(); e.stopPropagation(); return; }
+    if (state.crop) {
+      e.preventDefault();
+      e.stopPropagation();
+      // Clicking outside the crop frame applies the crop, like Slides.
+      if (!e.target.closest(".ce-crop-frame") && !state.crop.drag && Date.now() - (state.crop.lastDrag || 0) > 300) cropCommit();
+      return;
+    }
     if (state.suppressClick) {
       const fresh = Date.now() - state.suppressClick < 400;
       state.suppressClick = 0;
@@ -783,15 +789,18 @@
     frame.addEventListener("mousedown", (e) => cropDown(e, null));
     const hint = state.doc.createElement("div");
     hint.className = "ce-crop-hint";
-    hint.textContent = "Crop: drag handles to cut, drag inside to move the image. Enter applies, Esc cancels.";
+    hint.textContent = "Crop: drag the handles to cut, drag inside to move the image. Click outside or press Enter to apply, Esc to cancel.";
     state.slide.appendChild(ghost);
     state.slide.appendChild(frame);
     state.slide.appendChild(hint);
-    state.crop = { sel, el, img, ghost, frame, hint, full, box: { ...b }, autoHeight: !el.style.height || el.getAttribute("data-auto-height") === "1", drag: null };
+    state.crop = { sel, el, img, ghost, frame, hint, full, box: { ...b }, autoHeight: !el.style.height || el.getAttribute("data-auto-height") === "1", drag: null, lastDrag: 0 };
     hideBox();
     cropRender();
     state.doc.addEventListener("mousemove", cropMove, true);
     state.doc.addEventListener("mouseup", cropUp, true);
+    // Keyboard (Enter/Esc) lives in the iframe, so take focus from the toolbar.
+    try { state.iframe.contentWindow.focus(); state.doc.body.focus(); } catch (err) { /* ignore */ }
+    emit("ce-crop-state", { active: true });
   }
 
   function cropRender() {
@@ -856,7 +865,7 @@
   }
 
   function cropUp() {
-    if (state.crop && state.crop.drag) state.crop.drag = null;
+    if (state.crop && state.crop.drag) { state.crop.drag = null; state.crop.lastDrag = Date.now(); }
   }
 
   function cropExit() {
@@ -866,6 +875,7 @@
     state.doc.removeEventListener("mouseup", cropUp, true);
     [c.ghost, c.frame, c.hint].forEach((n) => n.parentNode && n.parentNode.removeChild(n));
     state.crop = null;
+    emit("ce-crop-state", { active: false });
   }
 
   function cropCommit() {
@@ -958,6 +968,7 @@
     cropEnter() { cropEnter(); },
     cropCommit() { cropCommit(); },
     cropCancel() { cropCancel(); },
+    cropActive() { return !!state.crop; },
     resetSize() { resetSize(); },
   };
 })();

@@ -123,6 +123,7 @@ class EditorState:
         self.selection: dict | None = None
         self.extra: list[dict] = []
         self.clipboard: list[str] = []
+        self.cropping = False
         self.undo: list[str] = []
         self.redo: list[str] = []
         self.version = 0
@@ -837,6 +838,12 @@ def _editor_page(ui, app, st: EditorState):
     def toolbar():
         t = _text_target()
         sel = st.selection
+        if st.cropping:
+            ui.label("Cropping").classes("ce-tb-label")
+            ui.button("Apply crop", icon="check", on_click=lambda: ui.run_javascript("window.colloquiumEditor.cropCommit()")).props("dense size=sm color=orange")
+            ui.button("Cancel", icon="close", on_click=lambda: ui.run_javascript("window.colloquiumEditor.cropCancel()")).props("flat dense size=sm")
+            ui.label("drag the orange handles to cut · drag inside to move the image · click outside or Enter applies · Esc cancels").classes("text-xs")
+            return
         if not t:
             if sel and sel.get("kind") == "place":
                 refs = st.slide.place_refs()
@@ -1394,7 +1401,12 @@ def _editor_page(ui, app, st: EditorState):
         mutate(apply)
         notify("Image is now placed freely (was inline)")
 
+    def on_crop_state(e):
+        st.cropping = bool((e.args or {}).get("active"))
+        toolbar.refresh()
+
     def on_crop(e):
+        st.cropping = False
         a = e.args or {}
         i = int(a["index"])
         refs = st.slide.place_refs()
@@ -1462,6 +1474,7 @@ def _editor_page(ui, app, st: EditorState):
     ui.on("ce-select", on_select)
     ui.on("ce-geometry", on_geometry)
     ui.on("ce-crop", on_crop)
+    ui.on("ce-crop-state", on_crop_state)
     ui.on("ce-img-size", on_img_size)
     ui.on("ce-img-move", on_img_move)
     ui.on("ce-command", on_command)
@@ -1471,6 +1484,12 @@ def _editor_page(ui, app, st: EditorState):
 
     def on_key(e):
         if not e.action.keydown:
+            return
+        if st.cropping and e.key == "Enter":
+            ui.run_javascript("window.colloquiumEditor.cropCommit()")
+            return
+        if st.cropping and e.key == "Escape":
+            ui.run_javascript("window.colloquiumEditor.cropCancel()")
             return
         if e.modifiers.ctrl and e.key == "z":
             undo()
