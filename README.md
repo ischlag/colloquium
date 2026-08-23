@@ -10,6 +10,8 @@ This is a fork of [Nathan Lambert's colloquium](https://github.com/natolambert/c
 - **Footer links**: footer zones render markdown `[text](url)` links as anchors (e.g. the author name linking to a homepage).
 - **True-center footer**: the footer is a `1fr auto 1fr` grid, so the center zone stays page-centered regardless of the side zones' widths.
 - **Fullscreen icon**: the present button shows a four-corner fullscreen icon instead of a play triangle.
+- **Free placement**: a ```` ```place ```` block pins an image or a markdown text block at `x/y/w/h` percent of the slide, on any layout, with a non-destructive `crop: [x, y, w, h]` (fractions of the original; the file is never touched). Renders into its own layer, so it never disturbs columns/rows, and works in PDF export.
+- **Visual editor**: `colloquium edit deck.md` (or just `colloquium edit` for a file picker) opens a NiceGUI editor: slide list, the real build in a preview with drag/resize handles for placed elements, and an inspector for layout directives, column/row cell markdown, placed text, image replace/crop, z-index and rotation. Every change is written straight back to the `.md` with string-level edits, so untouched slides never show up in a diff; external edits to the file are picked up live. Install with `uv pip install -e ".[editor]"` (adds `nicegui` and `pillow`).
 - [`demo.md`](demo.md) at the repo root exercises every feature; build it with `colloquium build demo.md`.
 
 Everything below is the upstream README.

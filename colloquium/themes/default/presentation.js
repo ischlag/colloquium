@@ -38,6 +38,12 @@ class ColloquiumPresentation {
         if (new URLSearchParams(location.search).has('capture')) {
             document.body.classList.add('colloquium-capture');
         }
+        // Edit mode (colloquium edit) — the host page owns pointer and keyboard
+        // input, so click/touch/key navigation is disabled.
+        this.editMode = new URLSearchParams(location.search).has('edit');
+        if (this.editMode) {
+            document.body.classList.add('colloquium-edit');
+        }
 
         if (this.totalSlides === 0) return;
 
@@ -474,6 +480,7 @@ class ColloquiumPresentation {
 
     _bindKeyboard() {
         document.addEventListener('keydown', (e) => {
+            if (this.editMode) return;
             if (this._isTextInputTarget(e.target)) return;
             this._handleNavigationKey(e);
         });
@@ -597,6 +604,7 @@ class ColloquiumPresentation {
         });
 
         document.addEventListener('click', (e) => {
+            if (this.editMode) return;
             // Handle citation links — navigate to the slide containing the target ref
             const citeLink = e.target.closest('a.colloquium-cite');
             if (citeLink) {
@@ -646,11 +654,13 @@ class ColloquiumPresentation {
         let startY = 0;
 
         document.addEventListener('touchstart', (e) => {
+            if (this.editMode) return;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
         }, { passive: true });
 
         document.addEventListener('touchend', (e) => {
+            if (this.editMode) return;
             const dx = e.changedTouches[0].clientX - startX;
             const dy = e.changedTouches[0].clientY - startY;
 

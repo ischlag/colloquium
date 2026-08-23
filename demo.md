@@ -186,8 +186,6 @@ messages:
 
 ---
 
-<!-- columns: 2 -->
-
 ## Free placement
 
 Normal content flows as usual. ```` ```place ```` blocks pin images and text
@@ -223,6 +221,8 @@ text: |
 ```
 
 ---
+
+<!-- columns: 2 -->
 
 ## Callout boxes
 

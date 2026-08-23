@@ -109,7 +109,7 @@ Left column.
 
 {IMAGE_BLOCK}
 
-::: column
+|||
 
 Right column.
 """

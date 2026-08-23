@@ -11,6 +11,7 @@ Colloquium is an agent-native slide creation tool for research talks. Markdown-b
 - To preview built slides, open the `.html` file directly (`open examples/hello/hello.html`), NOT via the serve URL
 - `uv run colloquium capture examples/hello/hello.md` to capture slides as PNGs
 - `uv run pytest` to run tests
+- `uv run colloquium edit demo.md` opens the visual editor (needs `uv sync --extra editor`)
 
 ## Changelog
 - Update `CHANGELOG.md` with every PR — **one line per PR**, not per commit
@@ -75,6 +76,12 @@ colloquium/
 ├── export.py         # PDF export + slide capture (system Chrome + print CSS)
 ├── deck.py           # Deck class (agent-facing API)
 ├── slide.py          # Slide dataclass
+├── elements/place.py # ```place blocks: free x/y/w/h placement + crop, rendered into a slide-level layer
+├── editor/           # `colloquium edit` (NiceGUI, optional extra [editor])
+│   ├── document.py   # lossless string-level deck editing (never round-trips through Slide)
+│   ├── app.py        # three-pane UI: slide list | iframe preview | inspector
+│   ├── overlay.js    # selection/drag/resize inside the preview iframe (same origin)
+│   └── images.py     # image import into the deck folder, dimensions
 └── themes/default/
     ├── theme.css     # Default theme
     └── presentation.js  # Navigation engine
