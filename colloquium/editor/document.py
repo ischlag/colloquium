@@ -22,6 +22,8 @@ _DIRECTIVE_RE = re.compile(r"<!--\s*([a-z][a-z-]*)\s*:\s*(.*?)\s*-->[ \t]*\n?", 
 _TITLE_RE = re.compile(r"^(#{1,2}) (.*)$", re.MULTILINE)
 _COLUMN_SPLIT_RE = re.compile(r"^\|\|\|[ \t]*$", re.MULTILINE)
 _ROW_SPLIT_RE = re.compile(r"^===[ \t]*$", re.MULTILINE)
+_CELL_STYLE_RE = re.compile(r"<!--\s*cell-style\s*:\s*(.*?)\s*-->[ \t]*\n?", re.DOTALL)
+_ROW_COLUMNS_RE = re.compile(r"<!--\s*row-columns\s*:\s*(.*?)\s*-->", re.DOTALL)
 
 DEFAULT_SEPARATOR = "\n\n---\n\n"
 
@@ -229,6 +231,137 @@ class SlideChunk:
         if s == 0:
             lead = ""
         self.text = (self.text[:s] + lead + value + trail + self.text[e:]).strip("\n")
+
+
+    # ----- per-cell style -----------------------------------------------------
+    def get_cell_style(self, i: int) -> str:
+        """Inline CSS applied to cell *i* via a ``<!-- cell-style: ... -->`` comment."""
+        s, e = self.cell_spans()[i]
+        m = _CELL_STYLE_RE.search(self.text[s:e])
+        return m.group(1).strip() if m else ""
+
+    def set_cell_style(self, i: int, value: str) -> None:
+        """Set the full ``<!-- cell-style: ... -->`` of cell *i* (empty removes it)."""
+        s, e = self.cell_spans()[i]
+        seg = self.text[s:e]
+        m = _CELL_STYLE_RE.search(seg)
+        new = value.strip().rstrip(";")
+        if m:
+            if new:
+                trail = "\n" if m.group(0).endswith("\n") else ""
+                seg = seg[: m.start()] + f"<!-- cell-style: {new} -->{trail}" + seg[m.end():]
+            else:
+                seg = re.sub(r"\n{3,}", "\n\n", seg[: m.start()] + seg[m.end():])
+        elif new:
+            k = 0
+            while k < len(seg) and seg[k] == "\n":
+                k += 1
+            seg = seg[:k] + f"<!-- cell-style: {new} -->\n\n" + seg[k:]
+        else:
+            return
+        self.text = (self.text[:s] + seg + self.text[e:]).strip("\n")
+
+    def set_cell_style_props(self, i: int, **props: str | None) -> None:
+        self.set_cell_style(i, update_style(self.get_cell_style(i), **props))
+
+    # ----- flow blocks (markdown blocks as objects) ---------------------------
+    @staticmethod
+    def _block_spans_in(masked: str) -> list[tuple[int, int]]:
+        """Spans of blank-line separated blocks, fence-aware, relative to *masked*."""
+        spans: list[tuple[int, int]] = []
+        offset = 0
+        start = None
+        end = 0
+        fence = False
+        for line in masked.splitlines(keepends=True):
+            stripped = line.strip()
+            if not stripped and not fence:
+                if start is not None:
+                    spans.append((start, end))
+                    start = None
+            else:
+                if start is None:
+                    start = offset
+                end = offset + len(line.rstrip("\n"))
+                if stripped.startswith("```") or stripped.startswith("~~~"):
+                    fence = not fence
+            offset += len(line)
+        if start is not None:
+            spans.append((start, end))
+        return spans
+
+    def cell_flow_blocks(self, i: int) -> list[tuple[int, int]]:
+        """Absolute spans of the visible markdown blocks in cell *i*.
+
+        Skips place blocks, positioned HTML and comment/directive-only blocks,
+        matching the top-level elements the browser renders for the cell.
+        """
+        s, e = self.cell_spans()[i]
+        seg = self.text[s:e]
+        masked = seg
+        for a, b in self._kept_spans(seg):
+            masked = masked[:a] + " " * (b - a) + masked[b:]
+        out = []
+        for a, b in self._block_spans_in(masked):
+            visible = re.sub(r"<!--.*?-->", "", masked[a:b], flags=re.DOTALL)
+            if not visible.strip():
+                continue
+            out.append((s + a, s + b))
+        return out
+
+    def get_cell_block(self, i: int, j: int) -> str:
+        a, b = self.cell_flow_blocks(i)[j]
+        return self.text[a:b]
+
+    def set_cell_block(self, i: int, j: int, value: str) -> None:
+        a, b = self.cell_flow_blocks(i)[j]
+        self.text = re.sub(r"\n{3,}", "\n\n", self.text[:a] + value.strip("\n") + self.text[b:]).strip("\n")
+
+    def remove_cell_block(self, i: int, j: int) -> None:
+        a, b = self.cell_flow_blocks(i)[j]
+        self.text = re.sub(r"\n{3,}", "\n\n", self.text[:a] + self.text[b:]).strip("\n")
+
+    def convert_cell_block_to_place(self, i: int, j: int, x: float, y: float, w: float) -> int:
+        """Lift a flow block out of the cell into a ```place block."""
+        block = self.get_cell_block(i, j).strip("\n")
+        self.remove_cell_block(i, j)
+        spec = place.PlaceSpec(x=round(x, 1), y=round(y, 1), w=round(w, 1))
+        m = _MD_IMAGE_RE.fullmatch(block.strip())
+        if m:
+            spec.src = m.group("src")
+        else:
+            spec.text = block + "\n"
+        return self.add_place(spec)
+
+    # ----- rows and grid fractions --------------------------------------------
+    def row_spans(self) -> list[tuple[int, int]]:
+        """Spans of ``===``-separated rows in the body (place blocks masked)."""
+        start, end = self._body_span()
+        body = self.text[start:end]
+        masked = body
+        for ref in self._place_refs_in(body):
+            masked = masked[: ref.start] + " " * (ref.end - ref.start) + masked[ref.end :]
+        spans = []
+        pos = 0
+        for m in _ROW_SPLIT_RE.finditer(masked):
+            spans.append((start + pos, start + m.start()))
+            pos = m.end()
+        spans.append((start + pos, end))
+        return spans
+
+    def set_row_columns(self, row: int, value: str) -> None:
+        """Set the ``<!-- row-columns: ... -->`` spec inside row *row*."""
+        a, b = self.row_spans()[row]
+        seg = self.text[a:b]
+        m = _ROW_COLUMNS_RE.search(seg)
+        if m:
+            seg = seg[: m.start()] + f"<!-- row-columns: {value} -->" + seg[m.end() :]
+        else:
+            k = 0
+            while k < len(seg) and seg[k] == "\n":
+                k += 1
+            seg = seg[:k] + f"<!-- row-columns: {value} -->\n\n" + seg[k:]
+        self.text = (self.text[:a] + seg + self.text[b:]).strip("\n")
 
     # ----- place blocks -----------------------------------------------------
     @staticmethod
@@ -471,6 +604,15 @@ def update_style(style: str, **props: str | None) -> str:
         if k not in seen and v is not None:
             out.append((k, v))
     return format_inline_style(out)
+
+
+def format_grid_fractions(fractions: list[float]) -> str:
+    """Format measured track sizes as an integer percent spec like ``62/38``."""
+    vals = [max(1.0, float(f)) for f in fractions]
+    total = sum(vals)
+    ints = [max(2, int(round(v * 100.0 / total))) for v in vals]
+    ints[ints.index(max(ints))] += 100 - sum(ints)
+    return "/".join(str(v) for v in ints)
 
 
 def _px(value: str) -> float | None:

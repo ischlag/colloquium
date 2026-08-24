@@ -138,3 +138,20 @@ def test_shapes_render_and_round_trip():
     assert "<line" in html and 'y1="100%"' in html and "marker-end" in html
     assert place.render_spec(arrow, 1) == html  # deterministic ids
     assert place.parse_spec(arrow.to_yaml()).flip is True
+
+
+def test_group_renders_data_attribute():
+    from colloquium.elements.place import PlaceSpec, render_spec
+
+    html = render_spec(PlaceSpec(x=1, y=2, w=10, text="hi", group="g2"), 0)
+    assert 'data-group="g2"' in html
+
+
+def test_cell_style_comment_styles_columns():
+    from colloquium.build import build_deck
+    from colloquium.parse import parse_markdown
+
+    src = "## A\n\n<!-- cell-style: text-align: center -->\n\n<!-- columns: 2 -->\n\nLeft.\n\n|||\n\nRight."
+    html = build_deck(parse_markdown(src))
+    assert '<div class="col" style="text-align: center">' in html
+    assert "cell-style" not in html.split("</style>")[-1]

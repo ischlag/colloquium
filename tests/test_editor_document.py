@@ -303,3 +303,88 @@ def test_set_flow_image_size():
     chunk.set_flow_image_size(1, height_px=200)
     assert 'style="border-radius: 8px; height: 200px"' in chunk.text
     assert [r[2] for r in chunk.flow_image_refs()] == ["images/fig.png", "b.png"]
+
+
+def test_cell_style_get_set():
+    doc = DeckDocument.from_text(DECK)
+    chunk = doc.slides[1]
+    assert chunk.get_cell_style(0) == ""
+    chunk.set_cell_style_props(0, **{"text-align": "center"})
+    assert chunk.get_cell_style(0) == "text-align: center"
+    assert "<!-- cell-style: text-align: center -->" in chunk.text
+    chunk.set_cell_style_props(1, color="red")
+    assert chunk.get_cell_style(1) == "color: red"
+    assert chunk.get_cell_style(0) == "text-align: center"
+    chunk.set_cell_style_props(0, **{"text-align": None})
+    assert chunk.get_cell_style(0) == ""
+    chunk.set_cell_style(1, "")
+    assert doc.to_text().count("cell-style") == 0
+    # surrounding content untouched
+    assert chunk.get_cell(0) == "Left text."
+    assert len(chunk.place_refs()) == 1
+
+
+def test_cell_flow_blocks_and_convert():
+    doc = DeckDocument.from_text(DECK)
+    chunk = doc.slides[1]
+    blocks0 = [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)]
+    assert blocks0 == ["Left text."]
+    # notes directive is not a visible block
+    blocks1 = [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(1)]
+    assert blocks1 == ["Right text."]
+    chunk.set_cell_block(1, 0, "Right text edited.")
+    assert chunk.get_cell_block(1, 0) == "Right text edited."
+    assert "<!-- notes: speaker notes -->" in chunk.text
+    idx = chunk.convert_cell_block_to_place(0, 0, 12, 34, 25)
+    spec = chunk.get_place(idx)
+    assert spec.text.strip() == "Left text." and spec.x == 12 and spec.w == 25
+    assert chunk.get_cell(0) == ""
+
+
+def test_convert_image_block_to_place():
+    chunk = SlideChunk("## T\n\nIntro.\n\n![Fig](images/f.png)\n\nAfter.")
+    blocks = chunk.cell_flow_blocks(0)
+    assert len(blocks) == 3
+    idx = chunk.convert_cell_block_to_place(0, 1, 5, 6, 40)
+    spec = chunk.get_place(idx)
+    assert spec.src == "images/f.png" and spec.kind == "image"
+    assert chunk.get_cell(0) == "Intro.\n\nAfter."
+
+
+def test_flow_blocks_skip_fences_and_kept_html():
+    text = "## T\n\npara one\n\n```python\ncode\n\nstill code\n```\n\n<div class=\"anno\" style=\"top: 1px; left: 2px\">pinned</div>\n\nlast"
+    chunk = SlideChunk(text)
+    blocks = [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)]
+    assert blocks == ["para one", "```python\ncode\n\nstill code\n```", "last"]
+
+
+def test_row_spans_and_row_columns():
+    text = "## T\n\n<!-- rows: 30/70 -->\n\nTop.\n\n===\n\n<!-- row-columns: 40/60 -->\n\nA\n\n|||\n\nB"
+    doc = DeckDocument.from_text(text)
+    chunk = doc.slides[0]
+    assert len(chunk.row_spans()) == 2
+    chunk.set_row_columns(1, "55/45")
+    assert "<!-- row-columns: 55/45 -->" in chunk.text
+    assert chunk.text.count("row-columns") == 1
+    chunk.set_row_columns(0, "20/80")
+    rows = chunk.row_spans()
+    assert "<!-- row-columns: 20/80 -->" in chunk.text[rows[0][0]:rows[0][1]]
+
+
+def test_format_grid_fractions():
+    from colloquium.editor.document import format_grid_fractions
+
+    assert format_grid_fractions([60, 40]) == "60/40"
+    assert format_grid_fractions([615.2, 380.1]) == "62/38"
+    assert format_grid_fractions([1, 1, 1]) == "34/33/33"
+    total = sum(int(x) for x in format_grid_fractions([3.3, 96.7]).split("/"))
+    assert total == 100
+
+
+def test_place_group_round_trip():
+    from colloquium.elements.place import PlaceSpec, parse_spec
+
+    spec = PlaceSpec(x=1, y=2, w=3, text="hi\n", group="g1")
+    again = parse_spec(spec.to_yaml())
+    assert again.group == "g1"
+    assert 'group: g1' in spec.to_yaml()

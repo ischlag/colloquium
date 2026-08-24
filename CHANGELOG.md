@@ -12,6 +12,7 @@ One line per PR for easy copy into GitHub releases.
 ## [Unreleased]
 
 - `place` element (free positioning of images and text in slide-percent coordinates, non-destructive crop) and `colloquium edit`, a NiceGUI visual editor (drag/resize overlay on the real build, in-place text editing, real thumbnails with drag reorder, multi-select, arrange/align/distribute, duplicate and copy/paste, shapes, inline-image conversion, formatting toolbar, on-canvas crop, inspector for directives/cells/placed elements, crop dialog, file picker, undo, lossless string-level writes back to the markdown)
+- Editor object model: flow markdown blocks are selectable objects (drag/resize converts them to `place` blocks), cells resize by dragging the divider (integer `columns`/`rows`/`row-columns` fractions), per-cell styling via `<!-- cell-style: ... -->` (toolbar alignment/colour/size), and grouping (`group:` key on place blocks; Ctrl+G/Ctrl+Shift+G, group move/align/scale)
 - Dot-based progress indicator (clickable per-slide dots, backmatter dots hidden until reached, letterbox- and dark-slide-aware palette), auto-generated ```outline blocks, markdown links in footer zones, true-center footer grid, fullscreen icon on the present button
 
 - Fix a purely numeric `rows` count spec (e.g. a typo'd `rows: 100000000`) allocating a count-sized list and potentially exhausting memory during builds ([#47](https://github.com/natolambert/colloquium/pull/47))

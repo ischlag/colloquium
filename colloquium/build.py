@@ -1067,13 +1067,30 @@ def _split_columns_from_rendered(rendered: str) -> str:
     return "".join(f'<div class="col">{p.strip()}</div>' for p in col_parts)
 
 
+_CELL_STYLE_HTML_RE = re.compile(r"[ \t]*<!--\s*cell-style\s*:\s*(.*?)\s*-->[ \t]*\n?", re.DOTALL)
+
+
+def _extract_cell_style(part: str) -> tuple[str, str]:
+    """Pull ``<!-- cell-style: ... -->`` comments out of a rendered cell."""
+    styles: list[str] = []
+
+    def grab(m):
+        styles.append(m.group(1).strip().rstrip(";"))
+        return ""
+
+    part = _CELL_STYLE_HTML_RE.sub(grab, part)
+    return part, "; ".join(x for x in styles if x)
+
+
 def _build_columns_html(rendered: str, animate_type: str | None) -> str:
     """Build column wrappers after processing fragments inside each column."""
     col_parts = re.split(r"<p>\|\|\|</p>", rendered)
-    return "".join(
-        f'<div class="col">{_prepare_fragments(part.strip(), animate_type)}</div>'
-        for part in col_parts
-    )
+    cols = []
+    for part in col_parts:
+        part, cell_style = _extract_cell_style(part)
+        attr = f' style="{html_module.escape(cell_style, quote=True)}"' if cell_style else ""
+        cols.append(f'<div class="col"{attr}>{_prepare_fragments(part.strip(), animate_type)}</div>')
+    return "".join(cols)
 
 
 def _extract_grid_spec(classes: list[str], prefix: str) -> str | None:
@@ -1183,6 +1200,9 @@ def _build_rows_html(
         if has_row_cols:
             rendered = _build_columns_html(rendered, frag_animate)
         else:
+            rendered, cell_style = _extract_cell_style(rendered)
+            if cell_style:
+                row_style += " " + html_module.escape(cell_style, quote=True) + ";"
             rendered = _prepare_fragments(rendered, frag_animate)
 
         style_attr = f' style="{row_style}"' if row_style else ""
@@ -1272,6 +1292,9 @@ def _build_slide_html(
                 rendered = _build_columns_html(rendered, frag_animate)
                 rendered, fragment_count = _number_fragments(rendered)
             else:
+                rendered, cell_style = _extract_cell_style(rendered)
+                if cell_style:
+                    content_style += html_module.escape(cell_style, quote=True) + ";"
                 rendered, fragment_count = _process_fragments(rendered, frag_animate)
             content_style_attr = f' style="{content_style}"' if content_style else ""
             parts.append(f'<div class="{" ".join(content_classes)}"{content_style_attr}>{rendered}</div>')

@@ -72,6 +72,7 @@ class PlaceSpec:
     crop: list[float] | None = None
     size: float | None = None
     align: str = ""
+    group: str = ""
     z: int | None = None
     rotate: float | None = None
     classes: list[str] = field(default_factory=list)
@@ -107,6 +108,8 @@ class PlaceSpec:
             lines.append(f"size: {_fmt(self.size, 2)}")
         if self.align:
             lines.append(f"align: {self.align}")
+        if self.group:
+            lines.append(f"group: {self.group}")
         if self.z is not None:
             lines.append(f"z: {self.z}")
         if self.rotate is not None:
@@ -179,6 +182,7 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
     spec.size = _num(data.get("size"))
     align = str(data.get("align", "") or "").strip().lower()
     spec.align = align if align in _ALIGNS else ""
+    spec.group = str(data.get("group", "") or "").strip()
     z = data.get("z")
     spec.z = int(z) if isinstance(z, (int, float)) else None
     spec.rotate = _num(data.get("rotate"))
@@ -274,8 +278,9 @@ def render_spec(spec: PlaceSpec, index: int, md=None) -> str:
     if spec.align:
         classes.append(f"colloquium-place--align-{spec.align}")
     classes.extend(html_module.escape(c) for c in spec.classes)
+    group_attr = f' data-group="{html_module.escape(str(spec.group), quote=True)}"' if spec.group else ""
     attrs = (
-        f'class="{" ".join(classes)}" data-place-index="{index}" '
+        f'class="{" ".join(classes)}" data-place-index="{index}"{group_attr} '
         f'style="{html_module.escape(_box_style(spec), quote=True)}"'
     )
 

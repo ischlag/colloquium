@@ -27,6 +27,7 @@
     drag: null,
     editor: null,
     crop: null,
+    dividers: [],
     suppressClick: 0,
   };
 
@@ -55,6 +56,12 @@
     .ce-crop-ghost { position: absolute; opacity: 0.35; pointer-events: none; z-index: 1003; max-width: none; max-height: none; }
     .ce-crop-frame { position: absolute; z-index: 1004; box-sizing: border-box; border: 2px solid #ff8c1e; cursor: move; background: transparent; box-shadow: 0 0 0 9999px rgba(0,0,0,0.25); }
     .ce-crop-frame .ce-handle { border-color: #ff8c1e; }
+    .ce-divider { position: absolute; z-index: 1001; pointer-events: auto; }
+    .ce-divider-v { width: 10px; cursor: col-resize; }
+    .ce-divider-h { height: 10px; cursor: row-resize; }
+    .ce-divider::after { content: ""; position: absolute; inset: 0; margin: auto; background: rgba(30, 120, 255, 0.55); border-radius: 2px; }
+    .ce-divider-v::after { width: 3px; }
+    .ce-divider-h::after { height: 3px; }
     .ce-crop-hint { position: absolute; z-index: 1005; left: 50%; top: 8px; transform: translateX(-50%); font: 14px/1.4 system-ui, sans-serif; background: #ff8c1e; color: #fff; padding: 3px 10px; border-radius: 4px; pointer-events: none; }
   `;
 
@@ -135,13 +142,46 @@
     );
   }
 
+  function cellEls() {
+    const content = state.slide.querySelector(".slide-content");
+    if (!content) return [];
+    const rows = Array.from(content.querySelectorAll(":scope > .colloquium-row"));
+    if (rows.length) {
+      const out = [];
+      rows.forEach((row) => {
+        const cols = Array.from(row.querySelectorAll(":scope > .col"));
+        if (cols.length) cols.forEach((c) => out.push(c));
+        else out.push(row);
+      });
+      return out;
+    }
+    const cols = Array.from(content.querySelectorAll(":scope > .col"));
+    return cols.length ? cols : [content];
+  }
+
+  function blocksIn(container) {
+    return Array.from(container.children).filter((el) => {
+      if (el.nodeType !== 1) return false;
+      if (el.tagName === "STYLE" || el.tagName === "SCRIPT") return false;
+      if (isEditorNode(el)) return false;
+      const cls = el.classList;
+      if (cls.contains("colloquium-place-layer") || cls.contains("colloquium-place")) return false;
+      if (cls.contains("colloquium-citations") || cls.contains("slide-footnotes")) return false;
+      if (el.style && (el.style.top || el.style.left)) return false; // positioned html
+      return true;
+    });
+  }
+
   function flowTarget(sel) {
     if (sel.kind === "title") return state.slide.querySelector("h1, h2");
     const content = state.slide.querySelector(".slide-content");
     if (!content) return null;
     if (sel.kind === "cell") {
-      const cells = content.querySelectorAll(":scope > .col, :scope > .colloquium-row");
-      return cells[sel.index] || content;
+      return cellEls()[sel.index] || content;
+    }
+    if (sel.kind === "block") {
+      const cell = cellEls()[Math.floor(sel.index / 100)];
+      return cell ? blocksIn(cell)[sel.index % 100] || null : null;
     }
     if (sel.kind === "img") return flowImgEls()[sel.index] || null;
     return content;
@@ -176,9 +216,17 @@
         const k = flowImgEls().indexOf(img);
         if (k >= 0) return { kind: "img", index: k };
       }
-      const cells = Array.from(content.querySelectorAll(":scope > .col, :scope > .colloquium-row"));
+      const cells = cellEls();
+      const single = cells.length === 1 && cells[0] === content;
       for (let i = 0; i < cells.length; i++) {
-        if (cells[i].contains(target)) return { kind: "cell", index: i };
+        if (!cells[i].contains(target)) continue;
+        const blocks = blocksIn(cells[i]);
+        for (let b = 0; b < blocks.length; b++) {
+          if (blocks[b].contains(target)) {
+            return { kind: "block", index: i * 100 + b, cell: i, block: b, count: blocks.length };
+          }
+        }
+        return single ? { kind: "content", index: 0 } : { kind: "cell", index: i };
       }
       return { kind: "content", index: 0 };
     }
@@ -230,6 +278,8 @@
       ro.textContent = `left ${Math.round(p.x * PX_W)}px  top ${Math.round(p.y * PX_H)}px  w ${Math.round(p.w * PX_W)}px`;
     } else if (state.selection && state.selection.kind === "img") {
       ro.textContent = `inline image  w ${Math.round(p.w * PX_W)}px  h ${Math.round(p.h * PX_H)}px  (drag to place freely)`;
+    } else if (state.selection && state.selection.kind === "block") {
+      ro.textContent = `inline block  (drag or resize to place freely)`;
     } else {
       ro.textContent = `x ${round(p.x)}  y ${round(p.y)}  w ${round(p.w)}  h ${round(p.h)}`;
     }
@@ -265,20 +315,34 @@
   function applySelection() {
     clearFlowSelection();
     hideBox();
+    clearDividers();
     if (!state.slide || state.crop) return;
     const sel = state.selection;
     if (!sel) return;
-    if (isMovable(sel) || sel.kind === "img") {
+    const gname = selectionGroupName();
+    if (gname) {
+      const gb = groupBBox();
+      if (gb) {
+        const box = ensureBox();
+        setBoxGeometry(box, gb);
+        box.querySelector(".ce-readout").textContent = `group ${gname}  x ${round(gb.x)}  y ${round(gb.y)}  w ${round(gb.w)}`;
+      }
+      drawExtraBoxes();
+      return;
+    }
+    if (isMovable(sel) || sel.kind === "img" || sel.kind === "block") {
       const el = elOf(sel);
       if (el) updateBox(el);
       drawExtraBoxes();
+      if (sel.kind === "block") updateDividers();
       return;
     }
     const target = flowTarget(sel);
     if (target) target.classList.add("ce-selected-flow");
+    if (sel.kind === "cell" || sel.kind === "content") updateDividers();
   }
 
-  function select(sel, notify, additive) {
+  function select(sel, notify, additive, single) {
     if (sel && sel.kind === "slide") sel = null;
     if (additive && sel && isMovable(sel) && isMovable(state.selection)) {
       if (sameSel(sel, state.selection)) {
@@ -291,6 +355,10 @@
     } else {
       state.selection = sel;
       state.extra = [];
+      if (sel && !single) {
+        const g = groupMembers(sel);
+        if (g) state.extra = g.filter((m) => !sameSel(m, sel));
+      }
     }
     applySelection();
     if (notify) emit("ce-select", selectionPayload());
@@ -300,8 +368,14 @@
     const sel = state.selection || { kind: "slide", index: 0 };
     const payload = { kind: sel.kind, index: sel.index, extra: state.extra.slice() };
     const el = elOf(sel);
-    if (sel.kind === "img" && el) payload.box = elPercentBox(el);
-    if (el && (sel.kind === "html" || sel.kind === "place")) {
+    if (el && (sel.kind === "img" || sel.kind === "block")) payload.box = elPercentBox(el);
+    if (sel.kind === "block") {
+      payload.cell = Math.floor(sel.index / 100);
+      payload.block = sel.index % 100;
+      const cont = cellEls()[payload.cell];
+      payload.count = cont ? blocksIn(cont).length : 0;
+    }
+    if (el && sel.kind !== "slide") {
       payload.font = parseFloat(state.doc.defaultView.getComputedStyle(el).fontSize) || 0;
     }
     return payload;
@@ -309,6 +383,134 @@
 
   function allSelected() {
     return isMovable(state.selection) ? [state.selection].concat(state.extra) : [];
+  }
+
+  function groupMembers(sel) {
+    if (!sel || sel.kind !== "place" || !state.slide) return null;
+    const el = placeEl(sel.index);
+    const g = el && el.getAttribute("data-group");
+    if (!g) return null;
+    const members = Array.from(state.slide.querySelectorAll('.colloquium-place[data-group="' + g + '"]'))
+      .map((m) => ({ kind: "place", index: parseInt(m.dataset.placeIndex, 10) }));
+    return members.length > 1 ? members : null;
+  }
+
+  function selectionGroupName() {
+    const sels = allSelected();
+    if (sels.length < 2) return null;
+    let g = null;
+    for (const s of sels) {
+      if (s.kind !== "place") return null;
+      const el = placeEl(s.index);
+      const gg = el && el.getAttribute("data-group");
+      if (!gg) return null;
+      if (g === null) g = gg;
+      else if (g !== gg) return null;
+    }
+    return g;
+  }
+
+  function groupBBox() {
+    const boxes = allSelected().map((s) => elOf(s)).filter(Boolean).map(elPercentBox);
+    if (!boxes.length) return null;
+    const x0 = Math.min(...boxes.map((b) => b.x));
+    const y0 = Math.min(...boxes.map((b) => b.y));
+    const x1 = Math.max(...boxes.map((b) => b.x + b.w));
+    const y1 = Math.max(...boxes.map((b) => b.y + b.h));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  // ---------- cell dividers (resize columns/rows) ----------
+  function clearDividers() {
+    state.dividers.forEach((d) => d.parentNode && d.parentNode.removeChild(d));
+    state.dividers = [];
+  }
+
+  function dividerContexts() {
+    const sel = state.selection;
+    if (!sel) return null;
+    let cellEl = null;
+    if (sel.kind === "cell") cellEl = cellEls()[sel.index];
+    else if (sel.kind === "block") cellEl = cellEls()[Math.floor(sel.index / 100)];
+    else if (sel.kind === "content") cellEl = cellEls()[0];
+    if (!cellEl) return null;
+    const content = state.slide.querySelector(".slide-content");
+    const ctxs = [];
+    if (cellEl.classList.contains("col")) {
+      const cont = cellEl.parentElement;
+      const items = Array.from(cont.querySelectorAll(":scope > .col"));
+      if (items.length > 1) {
+        let row = null;
+        if (cont.classList.contains("colloquium-row")) {
+          row = Array.from(content.querySelectorAll(":scope > .colloquium-row")).indexOf(cont);
+        }
+        ctxs.push({ container: cont, axis: "cols", items: items, row: row });
+      }
+    }
+    const rowEl = cellEl.classList.contains("colloquium-row") ? cellEl : cellEl.closest(".colloquium-row");
+    if (rowEl) {
+      const rows = Array.from(content.querySelectorAll(":scope > .colloquium-row"));
+      if (rows.length > 1) ctxs.push({ container: content, axis: "rows", items: rows, row: null });
+    }
+    return ctxs.length ? ctxs : null;
+  }
+
+  function updateDividers() {
+    clearDividers();
+    if (!state.slide) return;
+    const ctxs = dividerContexts();
+    if (!ctxs) return;
+    ctxs.forEach((ctx) => {
+      for (let k = 0; k < ctx.items.length - 1; k++) {
+        const div = state.doc.createElement("div");
+        div.className = "ce-divider ce-divider-" + (ctx.axis === "cols" ? "v" : "h");
+        div._ctx = ctx;
+        div._k = k;
+        div.addEventListener("mousedown", (e) => dividerDown(e, ctx, k));
+        state.slide.appendChild(div);
+        state.dividers.push(div);
+      }
+    });
+    positionDividers();
+  }
+
+  function positionDividers() {
+    const r = slideRect();
+    state.dividers.forEach((div) => {
+      const ctx = div._ctx, k = div._k;
+      const a = ctx.items[k].getBoundingClientRect();
+      const b = ctx.items[k + 1].getBoundingClientRect();
+      if (ctx.axis === "cols") {
+        const xm = (((a.right + b.left) / 2 - r.left) / r.width) * 100;
+        const y0 = ((Math.min(a.top, b.top) - r.top) / r.height) * 100;
+        const y1 = ((Math.max(a.bottom, b.bottom) - r.top) / r.height) * 100;
+        div.style.left = "calc(" + xm + "% - 5px)";
+        div.style.top = y0 + "%";
+        div.style.height = Math.max(2, y1 - y0) + "%";
+      } else {
+        const ym = (((a.bottom + b.top) / 2 - r.top) / r.height) * 100;
+        const x0 = ((Math.min(a.left, b.left) - r.left) / r.width) * 100;
+        const x1 = ((Math.max(a.right, b.right) - r.left) / r.width) * 100;
+        div.style.top = "calc(" + ym + "% - 5px)";
+        div.style.left = x0 + "%";
+        div.style.width = Math.max(2, x1 - x0) + "%";
+      }
+    });
+  }
+
+  function dividerDown(e, ctx, k) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = slideRect();
+    const sizes = ctx.items.map((el) => {
+      const b = el.getBoundingClientRect();
+      return (ctx.axis === "cols" ? b.width / r.width : b.height / r.height) * 100;
+    });
+    state.drag = {
+      mode: "cell-divider", axis: ctx.axis, row: ctx.row, container: ctx.container, k: k,
+      orig: sizes, tracks: sizes.slice(), start: toPercent(e.clientX, e.clientY), moved: false,
+    };
   }
 
   // ---------- geometry updates (batched) ----------
@@ -377,7 +579,7 @@
       select(hit, true, true);
       return;
     }
-    select(hit, true);
+    select(hit, true, false, e.altKey);
   }
 
   function onMouseDown(e) {
@@ -392,7 +594,16 @@
       if (!el) {
         const img = e.target.closest("img");
         const k = img ? flowImgEls().indexOf(img) : -1;
-        if (k < 0) return;
+        if (k < 0) {
+          const hit = hitTest(e.target);
+          if (!hit || hit.kind !== "block") return;
+          if (!sameSel(state.selection, hit)) select(hit, true, false, e.altKey);
+          const bel = elOf(hit);
+          if (!bel) return;
+          e.preventDefault();
+          state.drag = { mode: "move-block", el: bel, sel: hit, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(bel), moved: false };
+          return;
+        }
         // Dragging an inline image lifts it out of the flow: on drop it becomes
         // a placed image at the drop position.
         if (!sameSel(state.selection, { kind: "img", index: k })) select({ kind: "img", index: k }, true);
@@ -404,7 +615,7 @@
     }
     if (e.shiftKey) return; // shift-click toggles membership on click
     const inGroup = allSelected().some((s) => sameSel(s, sel));
-    if (!inGroup) select(sel, true);
+    if (!inGroup) select(sel, true, false, e.altKey);
     e.preventDefault();
     const members = allSelected().map((s) => ({ sel: s, el: elOf(s) })).filter((m) => m.el);
     const primary = members.find((m) => sameSel(m.sel, sel)) || members[0];
@@ -417,12 +628,34 @@
 
   function onHandleDown(e) {
     if (e.button !== 0 || !state.selection) return;
-    if (!isMovable(state.selection) && state.selection.kind !== "img") return;
+    if (selectionGroupName()) {
+      e.preventDefault();
+      e.stopPropagation();
+      const members = allSelected().map((s) => ({ sel: s, el: elOf(s) })).filter((m) => m.el);
+      members.forEach((m) => {
+        m.orig = elPercentBox(m.el);
+        m.autoHeight = m.sel.kind === "html" || !m.el.style.height || m.el.getAttribute("data-auto-height") === "1";
+      });
+      const gb = groupBBox();
+      state.drag = {
+        mode: "resize-group", handle: e.currentTarget.dataset.handle, members: members,
+        orig: gb, start: toPercent(e.clientX, e.clientY), moved: false, aspect: gb.h > 0 ? gb.w / gb.h : 1,
+      };
+      return;
+    }
+    if (!isMovable(state.selection) && state.selection.kind !== "img" && state.selection.kind !== "block") return;
     const el = elOf(state.selection);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
     const box = elPercentBox(el);
+    if (state.selection.kind === "block") {
+      state.drag = {
+        mode: "resize-block", handle: e.currentTarget.dataset.handle, el: el, sel: state.selection,
+        start: toPercent(e.clientX, e.clientY), orig: box, moved: false,
+      };
+      return;
+    }
     if (state.selection.kind === "img") {
       state.drag = {
         mode: "resize-img", handle: e.currentTarget.dataset.handle, el: el, index: state.selection.index,
@@ -459,6 +692,68 @@
       d.el.style.zIndex = "50";
       d.last = { x: d.orig.x + dx, y: d.orig.y + dy, w: d.orig.w, h: d.orig.h };
       updateBox(d.el);
+      return;
+    }
+    if (d.mode === "move-block") {
+      d.el.style.transform = `translate(${dx * PX_W}px, ${dy * PX_H}px)`;
+      d.el.style.position = "relative";
+      d.el.style.zIndex = "50";
+      d.last = { x: d.orig.x + dx, y: d.orig.y + dy, w: d.orig.w, h: d.orig.h };
+      updateBox(d.el);
+      return;
+    }
+    if (d.mode === "resize-block") {
+      const hnd = d.handle;
+      let x = d.orig.x, w = d.orig.w;
+      if (hnd.includes("e")) w = d.orig.w + dx;
+      if (hnd.includes("w")) { w = d.orig.w - dx; x = d.orig.x + dx; }
+      w = Math.max(4, w);
+      d.el.style.width = Math.round(w * PX_W) + "px";
+      d.el.style.maxWidth = "none";
+      d.el.style.position = "relative";
+      d.el.style.zIndex = "50";
+      d.el.style.transform = `translate(${(x - d.orig.x) * PX_W}px, 0px)`;
+      d.last = { x: x, y: d.orig.y, w: w, h: d.orig.h };
+      updateBox(d.el);
+      return;
+    }
+    if (d.mode === "resize-group") {
+      const hnd = d.handle;
+      let x = d.orig.x, y = d.orig.y, w = d.orig.w, h = d.orig.h;
+      if (hnd.includes("e")) w = d.orig.w + dx;
+      if (hnd.includes("s")) h = d.orig.h + dy;
+      if (hnd.includes("w")) { w = d.orig.w - dx; x = d.orig.x + dx; }
+      if (hnd.includes("n")) { h = d.orig.h - dy; y = d.orig.y + dy; }
+      w = Math.max(2, w);
+      h = Math.max(2, h);
+      if (hnd.length === 2 && !e.shiftKey) {
+        h = w / d.aspect;
+        if (hnd.includes("n")) y = d.orig.y + d.orig.h - h;
+      }
+      const sx = w / d.orig.w, sy = h / d.orig.h;
+      d.members.forEach((m) => {
+        m.last = {
+          x: x + (m.orig.x - d.orig.x) * sx, y: y + (m.orig.y - d.orig.y) * sy,
+          w: m.orig.w * sx, h: m.orig.h * sy,
+        };
+        applyBoxToEl(m.sel, m.el, m.last, { width: true, height: !m.autoHeight });
+      });
+      const box = ensureBox();
+      setBoxGeometry(box, { x: x, y: y, w: w, h: h });
+      drawExtraBoxes();
+      return;
+    }
+    if (d.mode === "cell-divider") {
+      const min = 4;
+      const delta = d.axis === "cols" ? dx : dy;
+      let a = d.orig[d.k] + delta;
+      a = Math.max(min, Math.min(d.orig[d.k] + d.orig[d.k + 1] - min, a));
+      d.tracks = d.orig.slice();
+      d.tracks[d.k] = a;
+      d.tracks[d.k + 1] = d.orig[d.k] + d.orig[d.k + 1] - a;
+      d.container.style[d.axis === "cols" ? "gridTemplateColumns" : "gridTemplateRows"] =
+        d.tracks.map((t) => "minmax(0, " + t.toFixed(2) + "fr)").join(" ");
+      positionDividers();
       return;
     }
     if (d.mode === "resize-img") {
@@ -536,10 +831,31 @@
     state.drag = null;
     if (state.guides) { state.guides.v.style.display = "none"; state.guides.h.style.display = "none"; }
     if (!d.moved) {
-      if (d.mode === "move-img") { d.el.style.transform = ""; d.el.style.position = ""; d.el.style.zIndex = ""; }
+      if (d.mode === "move-img" || d.mode === "move-block" || d.mode === "resize-block") {
+        d.el.style.transform = ""; d.el.style.position = ""; d.el.style.zIndex = "";
+        if (d.mode === "resize-block") { d.el.style.width = ""; d.el.style.maxWidth = ""; }
+      }
       return;
     }
     state.suppressClick = Date.now();
+    if (d.mode === "move-block" || d.mode === "resize-block") {
+      const p = d.last || d.orig;
+      const cell = Math.floor(d.sel.index / 100);
+      const cont = cellEls()[cell];
+      emit(d.mode === "move-block" ? "ce-block-move" : "ce-block-resize", {
+        cell: cell, block: d.sel.index % 100, count: cont ? blocksIn(cont).length : 0,
+        x: round(p.x), y: round(p.y), w: round(p.w),
+      });
+      return;
+    }
+    if (d.mode === "resize-group") {
+      emitGeometry(d.members.map((m) => geometryItem(m.sel, m.el, m.last || m.orig, { width: true, height: !m.autoHeight, clearHeight: m.autoHeight })));
+      return;
+    }
+    if (d.mode === "cell-divider") {
+      emit("ce-cell-resize", { axis: d.axis, row: d.row, fractions: d.tracks || d.orig });
+      return;
+    }
     if (d.mode === "move-img") {
       const p = d.last || d.orig;
       emit("ce-img-move", { index: d.index, x: round(p.x), y: round(p.y), w: round(p.w) });
@@ -577,6 +893,7 @@
     if (!state.selection) return;
     if (ctrl && e.key === "c") { e.preventDefault(); emit("ce-command", { name: "copy", selection: allSelected() }); return; }
     if (ctrl && e.key === "d") { e.preventDefault(); emit("ce-command", { name: "duplicate", selection: allSelected() }); return; }
+    if (ctrl && (e.key === "g" || e.key === "G")) { e.preventDefault(); emit("ce-command", { name: e.shiftKey ? "ungroup" : "group", selection: allSelected() }); return; }
     if (ctrl && (e.key === "b" || e.key === "i")) { e.preventDefault(); format(e.key === "b" ? "bold" : "italic"); return; }
     if (ctrl && (e.key === "ArrowUp" || e.key === "ArrowDown") && isMovable(state.selection)) {
       e.preventDefault();
@@ -586,6 +903,11 @@
     }
     if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); requestEdit(state.selection); return; }
     if (e.key === "Escape") { select(null, true); return; }
+    if (state.selection.kind === "block" && (e.key === "Delete" || e.key === "Backspace")) {
+      e.preventDefault();
+      emit("ce-command", { name: "delete_block", selection: [state.selection] });
+      return;
+    }
     if (!isMovable(state.selection)) return;
     if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
@@ -970,5 +1292,18 @@
     cropCancel() { cropCancel(); },
     cropActive() { return !!state.crop; },
     resetSize() { resetSize(); },
+    convertBlock() {
+      const sel = state.selection;
+      if (!sel || sel.kind !== "block") return;
+      const el = elOf(sel);
+      if (!el) return;
+      const b = elPercentBox(el);
+      const cell = Math.floor(sel.index / 100);
+      const cont = cellEls()[cell];
+      emit("ce-block-move", {
+        cell: cell, block: sel.index % 100, count: cont ? blocksIn(cont).length : 0,
+        x: round(b.x), y: round(b.y), w: round(b.w),
+      });
+    },
   };
 })();

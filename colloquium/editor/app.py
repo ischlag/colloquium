@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from colloquium.editor import images
-from colloquium.editor.document import DeckDocument, parse_inline_style
+from colloquium.editor.document import DeckDocument, parse_inline_style, format_grid_fractions
 from colloquium.elements import place
 
 LAYOUTS = [
@@ -415,7 +415,7 @@ def _editor_page(ui, app, st: EditorState):
                     pos_label = ui.label()
                     ui.button(icon="chevron_right", on_click=lambda: goto(st.index + 1)).props("flat dense color=white")
                     ui.space()
-                    ui.label("click selects · shift-click multi-select · double-click edits · drag moves · handles resize · Ctrl+D duplicate · Ctrl+C/V copy/paste · Ctrl+↑/↓ order · arrows nudge · Del removes").classes("text-gray-400")
+                    ui.label("click selects · shift-click multi-select · double-click edits · drag moves · handles resize · Ctrl+G group · Ctrl+D duplicate · Ctrl+C/V copy/paste · Ctrl+↑/↓ order · arrows nudge · Del removes").classes("text-gray-400")
 
             with ui.element("div").classes("ce-inspector p-3") as inspector_pane:
                 @ui.refreshable
@@ -428,6 +428,8 @@ def _editor_page(ui, app, st: EditorState):
                         _html_inspector(sel["index"])
                     elif sel and sel.get("kind") == "img":
                         _img_inspector(sel["index"], sel.get("box"))
+                    elif sel and sel.get("kind") == "block":
+                        _block_inspector(sel)
                     elif sel and sel.get("kind") in {"cell", "content"}:
                         _cell_inspector(sel.get("index", 0))
                     elif sel and sel.get("kind") == "title":
@@ -535,7 +537,17 @@ def _editor_page(ui, app, st: EditorState):
             "blur", lambda e, i=i: set_cell(i, e.sender.value)
         ).on("keydown.ctrl.enter", lambda e, i=i: set_cell(i, e.sender.value))
         ui.label("blur or Ctrl+Enter applies").classes("text-xs text-gray-400")
+        ui.input(label="Cell style (CSS)", value=chunk.get_cell_style(i)).props("dense outlined").classes("w-full").on(
+            "blur", lambda e, i=i: set_cell_style_raw(i, e.sender.value)
+        )
+        if len(spans) > 1:
+            ui.label("Drag the blue divider between cells on the canvas to resize columns/rows; the toolbar sets alignment, colour and size for this cell.").classes("text-xs text-gray-400")
         ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
+
+    def set_cell_style_raw(i, value):
+        if value.strip().rstrip(";") == st.slide.get_cell_style(i):
+            return
+        mutate(lambda: st.slide.set_cell_style(i, value))
 
     def _place_inspector(i: int):
         chunk = st.slide
@@ -627,6 +639,10 @@ def _editor_page(ui, app, st: EditorState):
         ui.input(label="Extra CSS style", value=spec.style).props("dense outlined").classes("w-full").on(
             "blur", lambda e: set_place_attr(i, "style", e.sender.value.strip())
         )
+        if spec.group:
+            with ui.row().classes("items-center gap-2"):
+                ui.label(f"Group: {spec.group} (click selects the group, Alt+click one member)").classes("text-xs text-gray-500")
+                ui.button("Ungroup", on_click=lambda: ungroup_items([{"kind": "place", "index": i}] + st.extra)).props("flat dense size=sm")
         with ui.row().classes("gap-1 mt-2"):
             ui.button("Delete", icon="delete", on_click=lambda: delete_place(i)).props("flat dense color=negative")
             ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
@@ -646,6 +662,9 @@ def _editor_page(ui, app, st: EditorState):
             ui.button(icon="content_copy", on_click=lambda: duplicate_items([st.selection] + st.extra)).props("flat dense").tooltip("Duplicate (Ctrl+D)")
             ui.button(icon="copy_all", on_click=lambda: copy_to_clipboard([st.selection] + st.extra)).props("flat dense").tooltip("Copy (Ctrl+C)")
             ui.button(icon="content_paste", on_click=lambda: paste_clipboard()).props("flat dense").tooltip("Paste (Ctrl+V)")
+            ui.separator().props("vertical")
+            ui.button("Group", on_click=lambda: group_items([st.selection] + st.extra)).props("flat dense").tooltip("Group the selection (Ctrl+G): moves, aligns and resizes as one")
+            ui.button("Ungroup", on_click=lambda: ungroup_items([st.selection] + st.extra)).props("flat dense").tooltip("Ctrl+Shift+G")
         with ui.row().classes("gap-0 no-wrap"):
             for icon, mode, tip in [
                 ("align_horizontal_left", "left", "Align left"),
@@ -685,6 +704,35 @@ def _editor_page(ui, app, st: EditorState):
 
         ui.button("Convert to placed image", icon="swap_horiz", on_click=convert).props("flat dense")
         ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
+
+    def _block_inspector(sel: dict):
+        chunk = st.slide
+        c, b = divmod(int(sel.get("index", 0)), 100)
+        try:
+            blocks = chunk.cell_flow_blocks(c) if c < len(chunk.cell_spans()) else []
+        except IndexError:
+            blocks = []
+        ui.label("Inline block").classes("ce-section")
+        if b >= len(blocks):
+            ui.label("Cannot map this block to the markdown source; edit the cell instead.").classes("text-xs text-gray-400")
+            return
+        ui.textarea(label="Markdown", value=chunk.get_cell_block(c, b)).props("dense outlined autogrow input-class=font-mono input-style=font-size:12px").classes("w-full").on(
+            "blur", lambda e: set_block(c, b, e.sender.value)
+        ).on("keydown.ctrl.enter", lambda e: set_block(c, b, e.sender.value))
+        ui.label("Flows with the layout. Drag it on the canvas (or use Place freely) to turn it into a free object.").classes("text-xs text-gray-400")
+        with ui.row().classes("gap-1 mt-2"):
+            ui.button("Place freely", icon="open_with", on_click=lambda: ui.run_javascript("window.colloquiumEditor.convertBlock()")).props("flat dense")
+            ui.button("Delete", icon="delete", on_click=lambda: delete_block(c, b)).props("flat dense color=negative")
+            ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
+
+    def set_block(c, b, value):
+        if value.strip("\n") == st.slide.get_cell_block(c, b).strip("\n"):
+            return
+        mutate(lambda: st.slide.set_cell_block(c, b, value))
+
+    def delete_block(c, b):
+        st.selection = None
+        mutate(lambda: st.slide.remove_cell_block(c, b))
 
     def _html_inspector(i: int):
         chunk = st.slide
@@ -751,6 +799,10 @@ def _editor_page(ui, app, st: EditorState):
             refs = st.slide.html_abs_refs()
             if i < len(refs):
                 return ("html", i, refs[i])
+        if sel["kind"] in {"cell", "content"}:
+            spans = st.slide.cell_spans()
+            j = i if i < len(spans) else 0
+            return ("cell", j, _CellStyleObj(st.slide.get_cell_style(j)))
         return None
 
     def _style_get(target, key):
@@ -767,6 +819,8 @@ def _editor_page(ui, app, st: EditorState):
             return
         if kind == "place":
             mutate(lambda: st.slide.set_place_style_props(i, **{key: value}), reload_frame=True)
+        elif kind == "cell":
+            mutate(lambda: st.slide.set_cell_style_props(i, **{key: value}), reload_frame=True)
         else:
             mutate(lambda: st.slide.set_html_abs_style(i, **{key: value}), reload_frame=True)
 
@@ -861,12 +915,18 @@ def _editor_page(ui, app, st: EditorState):
                 ui.label("drag handles to resize in place · drag the image to place it freely").classes("text-xs")
                 ui.button("Place freely", icon="open_with", on_click=lambda: _convert_selected_img()).props("flat dense size=sm")
                 return
+            if sel and sel.get("kind") == "block":
+                ui.label("Inline block").classes("ce-tb-label")
+                ui.label("drag moves it out of the flow · side handles resize · double-click edits · Del removes").classes("text-xs")
+                ui.button("Place freely", icon="open_with", on_click=lambda: ui.run_javascript("window.colloquiumEditor.convertBlock()")).props("flat dense size=sm")
+                return
             ui.label("Select a text element to format it · double-click to edit text").classes("ce-tb-label")
             return
         kind, i, obj = t
-        ui.label("Text").classes("ce-tb-label")
-        for icon, fmt, tip in [("format_bold", "bold", "Bold (Ctrl+B)"), ("format_italic", "italic", "Italic (Ctrl+I)"), ("code", "code", "Code")]:
-            ui.button(icon=icon, on_click=lambda e, f=fmt: ui.run_javascript(f"window.colloquiumEditor.format({_json(f)})")).props("flat dense size=sm").tooltip(tip)
+        ui.label("Cell" if kind == "cell" else "Text").classes("ce-tb-label")
+        if kind != "cell":
+            for icon, fmt, tip in [("format_bold", "bold", "Bold (Ctrl+B)"), ("format_italic", "italic", "Italic (Ctrl+I)"), ("code", "code", "Code")]:
+                ui.button(icon=icon, on_click=lambda e, f=fmt: ui.run_javascript(f"window.colloquiumEditor.format({_json(f)})")).props("flat dense size=sm").tooltip(tip)
         ui.label("Size").classes("ce-tb-label")
         ui.button(icon="remove", on_click=lambda: font_step(-1)).props("flat dense size=sm")
         if kind == "place":
@@ -1173,10 +1233,9 @@ def _editor_page(ui, app, st: EditorState):
             st.selection = None
         else:
             st.selection = {"kind": sel.get("kind"), "index": int(sel.get("index", 0))}
-            if sel.get("box"):
-                st.selection["box"] = sel["box"]
-            if sel.get("font"):
-                st.selection["font"] = sel["font"]
+            for k in ("box", "font", "cell", "block", "count"):
+                if sel.get(k) is not None:
+                    st.selection[k] = sel[k]
         st.extra = [
             {"kind": x.get("kind"), "index": int(x.get("index", 0))}
             for x in (sel.get("extra") or [])
@@ -1256,6 +1315,17 @@ def _editor_page(ui, app, st: EditorState):
             duplicate_items(selected_items(a))
         elif name == "delete":
             delete_items(selected_items(a))
+        elif name == "group":
+            group_items(selected_items(a))
+        elif name == "ungroup":
+            ungroup_items(selected_items(a))
+        elif name == "delete_block":
+            sels = a.get("selection") or []
+            if sels and sels[0].get("kind") == "block":
+                c, b = divmod(int(sels[0].get("index", 0)), 100)
+                if c < len(st.slide.cell_spans()) and b < len(st.slide.cell_flow_blocks(c)):
+                    st.selection = None
+                    mutate(lambda: st.slide.remove_cell_block(c, b))
         elif name in {"front", "back", "forward", "backward"}:
             items = selected_items(a)
             if items:
@@ -1301,6 +1371,8 @@ def _editor_page(ui, app, st: EditorState):
                         first = first or {"kind": "html", "index": idx}
             st.selection = first
             st.extra = []
+            if first:
+                _remap_copied_groups(chunk, [first] + st.extra)
 
         mutate(apply)
 
@@ -1319,10 +1391,29 @@ def _editor_page(ui, app, st: EditorState):
                 for i in reversed(idxs):
                     dup(i)
                 sels += [{"kind": kind, "index": i + 1 + k} for k, i in enumerate(idxs)]
+            _remap_copied_groups(chunk, sels)
             st.selection = sels[0] if sels else None
             st.extra = sels[1:]
 
         mutate(apply)
+
+    def _remap_copied_groups(chunk, sels):
+        """Copies of grouped elements get a fresh group per original group."""
+        mapping = {}
+        for s2 in sels:
+            if s2["kind"] != "place" or s2["index"] >= len(chunk.place_refs()):
+                continue
+            spec = chunk.get_place(s2["index"])
+            if not spec.group:
+                continue
+            if spec.group not in mapping:
+                used = {r.spec.group for r in chunk.place_refs() if r.spec.group}
+                n = 1
+                while f"g{n}" in used or f"g{n}" in mapping.values():
+                    n += 1
+                mapping[spec.group] = f"g{n}"
+            spec.group = mapping[spec.group]
+            chunk.set_place(s2["index"], spec)
 
     def delete_items(items):
         if not items:
@@ -1359,11 +1450,105 @@ def _editor_page(ui, app, st: EditorState):
 
         mutate(apply)
 
+    def group_items(items):
+        items = [x for x in items if x and x.get("kind") in {"place", "html"}]
+        if len(items) < 2:
+            notify("Select 2+ elements to group (shift-click)", "warning")
+            return
+
+        def apply():
+            chunk = st.slide
+            idxs = []
+            for hi in sorted((int(x["index"]) for x in items if x["kind"] == "html"), reverse=True):
+                if hi < len(chunk.html_abs_refs()):
+                    idxs.append(chunk.convert_html_abs_to_place(hi))
+            idxs += [int(x["index"]) for x in items if x["kind"] == "place" and int(x["index"]) < len(chunk.place_refs())]
+            idxs = sorted(set(idxs))
+            if len(idxs) < 2:
+                return
+            used = {r.spec.group for r in chunk.place_refs() if r.spec.group}
+            n = 1
+            while f"g{n}" in used:
+                n += 1
+            for k in idxs:
+                spec = chunk.get_place(k)
+                spec.group = f"g{n}"
+                chunk.set_place(k, spec)
+            sels = [{"kind": "place", "index": k} for k in idxs]
+            st.selection = sels[0]
+            st.extra = sels[1:]
+
+        mutate(apply)
+        notify("Grouped: moves and resizes as one · Alt+click picks a single member")
+
+    def ungroup_items(items):
+        chunk = st.slide
+        idxs = sorted({int(x["index"]) for x in items if x and x.get("kind") == "place" and int(x["index"]) < len(chunk.place_refs())})
+        idxs = [k for k in idxs if chunk.get_place(k).group]
+        if not idxs:
+            notify("No grouped elements selected", "warning")
+            return
+
+        def apply():
+            for k in idxs:
+                spec = chunk.get_place(k)
+                spec.group = ""
+                chunk.set_place(k, spec)
+
+        mutate(apply)
+        notify("Ungrouped")
+
+    def on_block_convert(e):
+        a = e.args or {}
+        c, b = int(a.get("cell", 0)), int(a.get("block", 0))
+        chunk = st.slide
+        blocks = chunk.cell_flow_blocks(c) if c < len(chunk.cell_spans()) else []
+        if b >= len(blocks) or (a.get("count") is not None and int(a["count"]) != len(blocks)):
+            notify("Cannot map this block to the markdown source", "warning")
+            refresh_all()
+            return
+
+        def apply():
+            idx = chunk.convert_cell_block_to_place(c, b, float(a["x"]), float(a["y"]), float(a["w"]))
+            st.selection = {"kind": "place", "index": idx}
+            st.extra = []
+
+        mutate(apply)
+        notify("Block is now a free object (was inline)")
+
+    def on_cell_resize(e):
+        a = e.args or {}
+        try:
+            fr = [float(x) for x in (a.get("fractions") or [])]
+        except (TypeError, ValueError):
+            return
+        if len(fr) < 2 or any(f <= 0 for f in fr):
+            return
+        value = format_grid_fractions(fr)
+        chunk = st.slide
+        axis = a.get("axis")
+        row = a.get("row")
+
+        def apply():
+            if axis == "rows":
+                chunk.set_directive("rows", value)
+            elif row is None:
+                chunk.set_directive("columns", value)
+            else:
+                chunk.set_row_columns(int(row), value)
+
+        mutate(apply)
+
     def edit_value(sel) -> str | None:
         kind, i = sel.get("kind"), int(sel.get("index", 0))
         chunk = st.slide
         if kind == "title":
             return chunk.get_title()
+        if kind == "block":
+            c, b = divmod(i, 100)
+            if c < len(chunk.cell_spans()) and b < len(chunk.cell_flow_blocks(c)):
+                return chunk.get_cell_block(c, b)
+            return None
         if kind in {"cell", "content"}:
             spans = chunk.cell_spans()
             return chunk.get_cell(i if i < len(spans) else 0)
@@ -1432,6 +1617,9 @@ def _editor_page(ui, app, st: EditorState):
         kind, i, value = a.get("kind"), int(a.get("index", 0)), a.get("value", "")
         if kind == "title":
             set_title(value)
+        elif kind == "block":
+            c, b = divmod(i, 100)
+            set_block(c, b, value)
         elif kind in {"cell", "content"}:
             spans = st.slide.cell_spans()
             set_cell(i if i < len(spans) else 0, value)
@@ -1478,6 +1666,9 @@ def _editor_page(ui, app, st: EditorState):
     ui.on("ce-img-size", on_img_size)
     ui.on("ce-img-move", on_img_move)
     ui.on("ce-command", on_command)
+    ui.on("ce-block-move", on_block_convert)
+    ui.on("ce-block-resize", on_block_convert)
+    ui.on("ce-cell-resize", on_cell_resize)
     ui.on("ce-ready", on_ready)
     ui.on("ce-edit-request", on_edit_request)
     ui.on("ce-edit-commit", on_edit_commit)
@@ -1516,6 +1707,14 @@ def _editor_page(ui, app, st: EditorState):
     with toolbar_pane:
         toolbar()
     ui.run_javascript("window.colloquiumEditor.attach('ce-preview')")
+
+
+class _CellStyleObj:
+    """Adapter so a cell's cell-style comment can act as a toolbar text target."""
+
+    def __init__(self, style: str):
+        self.style = style
+        self.align = ""
 
 
 def _hex(value: str | None) -> str | None:

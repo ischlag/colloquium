@@ -39,6 +39,7 @@ Per-slide configuration via HTML comments:
 - `<!-- class: highlight -->` — CSS classes
 - `<!-- style: background: #1a1a2e -->` — inline styles
 - `<!-- notes: Speaker notes here -->` — speaker notes (hidden in presentation)
+- `<!-- cell-style: text-align: center -->` — placed inside a column/row cell, styles that cell's wrapper (used by the editor's cell toolbar)
 
 ### Output
 - All output is a single self-contained HTML file (CSS/JS inlined)
