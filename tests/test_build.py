@@ -147,6 +147,29 @@ class TestBuildDeck:
         assert ".slide .katex-display {" in html
         assert "overflow: visible !important;" in html
 
+    def test_print_css_swaps_live_iframes_for_linked_fallbacks(self):
+        deck = Deck(title="Test")
+        deck.add_slide(
+            title="Embed",
+            content=(
+                "```iframe\n"
+                "src: https://example.com/embed.html\n"
+                "title: Interactive demo\n"
+                "```"
+            ),
+        )
+        html = build_deck(deck)
+
+        assert '<iframe class="colloquium-iframe"' in html
+        assert '<div class="colloquium-iframe-print-fallback">' in html
+        assert (
+            ".colloquium-iframe-print-fallback,\n"
+            ".colloquium-iframe-print-snapshot {\n    display: none;"
+        ) in html
+        print_css = html[html.index("@media print") :]
+        assert ".colloquium-iframe {\n        display: none !important;" in print_css
+        assert ".colloquium-iframe-print-fallback {\n        display: flex !important;" in print_css
+
     def test_align_center_centers_standalone_images(self):
         deck = Deck(title="Test")
         deck.add_slide(title="Centered", content="![Alt](image.png)", classes=["align-center"])
@@ -926,6 +949,24 @@ class TestCitationRendering:
             assert "2024" in result
             assert "colloquium-cite" in result
             assert "smith2024" in cited_keys
+
+    def test_malformed_bib_warns_and_returns_empty(self, capsys):
+        """A broken entry must not silently disable every citation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = Path(tmpdir) / "refs.bib"
+            bib_path.write_text(
+                "@article{broken2024,\n  title={Missing closing brace}\n"
+                "@article{next2024,\n  title={Next},\n  year={2024}\n}\n"
+            )
+            assert _parse_bib_file(str(bib_path)) == {}
+            err = capsys.readouterr().err
+            assert "Warning: failed to parse bibliography" in err
+            assert "refs.bib" in err
+            assert "citations will not resolve" in err
+
+    def test_missing_bib_file_warns_and_returns_empty(self, capsys):
+        assert _parse_bib_file("/nonexistent/refs.bib") == {}
+        assert "Warning: failed to parse bibliography" in capsys.readouterr().err
 
     def test_numeric_style(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2004,3 +2045,23 @@ class TestFragments:
         # blockquote (frag 1) wraps the <p> and bullets (frags 2, 3)
         assert 'data-fragment-count="3"' in html
         assert '<div class="fragment" data-fragment-index="1"><blockquote>' in html
+
+
+class TestImgTallRightUtility:
+    def test_theme_ships_img_tall_right_rules(self):
+        import pathlib
+        css = (pathlib.Path("colloquium/themes/default/theme.css")).read_text()
+        assert ".slide.img-tall-right" in css
+        assert "figure.colloquium-figure:first-child:last-child > figcaption" in css
+
+    def test_class_directive_reaches_slide_markup(self, tmp_path):
+        src = tmp_path / "deck.md"
+        src.write_text(
+            "---\ntitle: t\n---\n\n"
+            "<!-- columns: 45/55 -->\n<!-- class: img-tall-right -->\n## S\n\nText\n\n|||\n\n"
+            "![cap](x.png)\n"
+        )
+        out = tmp_path / "deck.html"
+        build_file(str(src), str(out))
+        html = out.read_text()
+        assert "img-tall-right" in html

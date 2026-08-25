@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import html as html_module
 import re
+import sys
 import tempfile
 from pathlib import Path
 from string import Template
@@ -402,12 +403,30 @@ _CITATION_RE = re.compile(r'\[@([\w:.\-]+(?:\s*;\s*@[\w:.\-]+)*)\]')
 
 
 def _parse_bib_file(path: str) -> dict:
-    """Parse a .bib file using pybtex. Returns dict of key -> entry."""
+    """Parse a .bib file using pybtex. Returns dict of key -> entry.
+
+    Failures are non-fatal (the deck still builds) but must be loud: a
+    single malformed entry makes pybtex raise, and silently returning {}
+    leaves every citation in the deck unresolved with no hint why.
+    """
     try:
         from pybtex.database import parse_file as pybtex_parse
+    except ImportError:
+        print(
+            f"Warning: pybtex is not installed; skipping bibliography {path!r} "
+            "(citations will not resolve)",
+            file=sys.stderr,
+        )
+        return {}
+    try:
         bib = pybtex_parse(path, bib_format="bibtex")
         return dict(bib.entries)
-    except Exception:
+    except Exception as exc:
+        print(
+            f"Warning: failed to parse bibliography {path!r}: {exc} "
+            "-- citations will not resolve",
+            file=sys.stderr,
+        )
         return {}
 
 
@@ -1459,6 +1478,10 @@ window.colloquiumFitCaptionedFiguresIn = function(root) {
         var caption = figure.querySelector("figcaption");
         if (!img || !caption) return;
 
+        // Authors can take over layout entirely (e.g. absolutely positioned
+        // full-height figures); leave those untouched.
+        if (window.getComputedStyle(figure).position === "absolute") return;
+
         var container = figure.parentElement;
         if (!container) return;
 
@@ -1478,8 +1501,15 @@ window.colloquiumFitCaptionedFiguresIn = function(root) {
         }
 
         var availableWidth = container.clientWidth;
-        var availableHeight = container.clientHeight;
-        if (!availableWidth || !availableHeight) return;
+        // The caption sits below the image inside the figure: reserve its
+        // height (plus the figure's own gap) so the scaled image + caption
+        // fit the cell together instead of the caption overflowing onto
+        // whatever sits below (usually the footer).
+        var captionHeight = caption.offsetHeight || 0;
+        var figureStyle = window.getComputedStyle(figure);
+        var figureGap = parseFloat(figureStyle.rowGap || figureStyle.gap) || 0;
+        var availableHeight = container.clientHeight - captionHeight - figureGap;
+        if (!availableWidth || availableHeight <= 0) return;
 
         var scale = Math.min(
             availableWidth / naturalWidth,

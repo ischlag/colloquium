@@ -298,6 +298,7 @@ At the slide root, use either `columns:` or `rows:`. For nested layouts, use `ro
 | `<!-- class: no-figure-captions -->` | Disable deck-wide figure captions for a specific slide |
 | `<!-- img-align: center -->` | Align images only (`left`, `center`, `right`) — title unaffected |
 | `<!-- img-valign: top -->` | Vertically align standalone images in grid/row cells (`top`, `center`, `bottom`) |
+| `<!-- class: img-tall-right -->` | Columns slides: the right column's captioned figure runs full slide height, caption beneath. Requires figure captions (`figure_captions: true` or the `figure-captions` class) so the image renders as a `figure` |
 | `<!-- img-fill: true -->` | Expand image to fill available slide space |
 | `<!-- img-overflow: true -->` | Let images in grid cells bleed outside their box instead of fitting inside |
 
