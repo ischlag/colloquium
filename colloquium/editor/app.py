@@ -222,7 +222,7 @@ class EditorState:
         return self.doc.slides[self.index]
 
 
-def run_editor(path: str | None, port: int = 8765, open_browser: bool = True) -> None:
+def run_editor(path: str | None, port: int = 8791, open_browser: bool = True) -> None:
     from fastapi.responses import HTMLResponse
     from nicegui import app, ui
 

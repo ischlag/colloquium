@@ -161,7 +161,7 @@ def main():
     # edit
     edit_parser = subparsers.add_parser("edit", help="Visual slide editor (requires: pip install colloquium[editor])")
     edit_parser.add_argument("file", nargs="?", help="Deck markdown file (omit for a file picker)")
-    edit_parser.add_argument("-p", "--port", type=int, default=8765, help="Port (default: 8765)")
+    edit_parser.add_argument("-p", "--port", type=int, default=8791, help="Port (default: 8791)")
     edit_parser.add_argument("--no-browser", action="store_true", help="Do not open a browser window")
     edit_parser.set_defaults(func=_edit)
 
