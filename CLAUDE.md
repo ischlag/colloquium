@@ -10,7 +10,7 @@ Colloquium is an agent-native slide creation tool for research talks. Markdown-b
 - `uv run colloquium serve examples/hello/hello.md` for dev server (with live reload)
 - To preview built slides, open the `.html` file directly (`open examples/hello/hello.html`), NOT via the serve URL
 - `uv run colloquium capture examples/hello/hello.md` to capture slides as PNGs
-- `uv run pytest` to run tests
+- `uv run pytest` to run tests (editor page tests need `uv sync --extra dev --extra editor`)
 - `uv run colloquium edit demo.md` opens the visual editor (needs `uv sync --extra editor`)
 
 ## Changelog
@@ -80,11 +80,14 @@ colloquium/
 ├── slide.py          # Slide dataclass
 ├── elements/place.py # ```place blocks: free x/y/w/h placement + crop, rendered into a slide-level layer
 ├── editor/           # `colloquium edit` (NiceGUI, optional extra [editor])
-│   ├── document.py   # lossless string-level deck editing (never round-trips through Slide)
-│   ├── app.py        # three-pane UI: slide list | iframe preview | inspector
-│   ├── overlay.js    # selection/drag/resize inside the preview iframe (same origin)
+│   ├── document.py   # lossless string-level deck editing; blocks come from markdown-it's tokenizer so they match the DOM
+│   ├── state.py      # EditorState (deck, undo, build cache; one per deck) + Session (slide index/selection; one per tab)
+│   ├── app.py        # routes + EditorApp; page.py builds the three panes and owns mutate/refresh
+│   ├── actions.py    # document mutations from the UI; inspectors.py / toolbar.py / events.py are the other mixins
+│   ├── overlay.js    # selection/drag/resize inside the preview iframe (kinds: place, block[+img], cell, title, master)
 │   ├── images.py     # image import into the deck folder, dimensions
-│   └── theme.py      # custom_css helpers: --colloquium-* variables, slide background rule
+│   ├── theme.py      # custom_css helpers: --colloquium-* variables, slide background rule
+│   └── picker.py / thumbs.py  # file browser; contact-sheet slide list
 └── themes/default/
     ├── theme.css     # Default theme
     └── presentation.js  # Navigation engine

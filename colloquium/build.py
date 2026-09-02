@@ -1680,6 +1680,37 @@ def _build_font_css(fonts: dict | None) -> str:
     return ":root {\n" + "\n".join(overrides) + "\n}"
 
 
+def build_slide_section(deck: Deck, rendered_index: int) -> str | None:
+    """Render one ``<section>`` exactly as ``build_deck(include_master=True)`` would.
+
+    Used by the editor to refresh a single edited slide. Returns None when the
+    deck needs a full build (bibliography: citation numbering is deck-wide).
+    """
+    if deck.bibliography:
+        return None
+    md = _create_md_renderer()
+    master_slides = [slide for slide in deck.slides if slide.metadata.get("master") == "on"]
+    master_specs: list = []
+    for slide in master_slides:
+        _, specs = place.extract(slide.content or "")
+        master_specs.extend(specs)
+        if "slide--master" not in slide.classes:
+            slide.classes.append("slide--master")
+    master_layer = place.render_master_layer(master_specs, md) if master_specs else ""
+    main = [slide for slide in deck.slides if slide.metadata.get("after") != "references"]
+    post = [slide for slide in deck.slides if slide.metadata.get("after") == "references"]
+    order = main + post
+    if rendered_index >= len(order):
+        return None
+    html = _build_slide_html(
+        order[rendered_index], rendered_index, len(main), md, deck.footer,
+        deck_figure_captions=deck.figure_captions, master_layer=master_layer,
+    )
+    if rendered_index >= len(main):
+        html = html.replace('<section class="slide ', '<section class="slide slide--appendix ', 1)
+    return html
+
+
 def build_deck(deck: Deck, include_master: bool = False) -> str:
     """Build a Deck into a self-contained HTML string."""
     elements.reset()

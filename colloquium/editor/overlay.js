@@ -4,8 +4,9 @@
 //
 // Element kinds and how they map to the markdown source:
 //   place   ```place block (percent coordinates)          -> data-place-index
-//   html    raw HTML with inline top/left (px)             -> document order
-//   img     inline markdown/html image in the flow         -> document order
+//   block   a rendered top-level element of a cell         -> cell*100 + ordinal (markdown-it block order);
+//           `img` picks one image inside it (in-place resize, drag to place)
+//   master  a theme-slide element stamped on this slide    -> data-master-index (locked)
 //   title   first h1/h2 of the slide
 //   cell    a column/row cell (index), content = whole body
 (function () {
@@ -34,7 +35,7 @@
   const STYLE = `
     .ce-hover { outline: 1px dashed rgba(30, 120, 255, 0.55) !important; outline-offset: 2px; }
     .ce-selected-flow { outline: 2px solid rgba(30, 120, 255, 0.85) !important; outline-offset: 3px; }
-    .colloquium-place, .ce-html-abs { cursor: move; }
+    .colloquium-place { cursor: move; }
     .ce-box { position: absolute; pointer-events: none; z-index: 1000; border: 2px solid #1e78ff; box-sizing: border-box; }
     .ce-box-extra { position: absolute; pointer-events: none; z-index: 999; border: 2px dashed #1e78ff; box-sizing: border-box; }
     .ce-handle { position: absolute; width: 12px; height: 12px; background: #fff; border: 2px solid #1e78ff; border-radius: 2px; pointer-events: auto; box-sizing: border-box; transform: translate(-50%, -50%); }
@@ -107,7 +108,7 @@
   }
 
   function isMovable(sel) {
-    return !!sel && (sel.kind === "place" || sel.kind === "html");
+    return !!sel && sel.kind === "place";
   }
 
   // ---------- element lookup ----------
@@ -117,33 +118,7 @@
 
   function isEditorNode(el) {
     const cls = typeof el.className === "string" ? el.className : "";
-    return cls.split(" ").some((c) => c.startsWith("ce-")) && !cls.includes("ce-html-abs") && !cls.includes("ce-hover") && !cls.includes("ce-selected-flow");
-  }
-
-  function htmlAbsEls() {
-    return Array.from(state.slide.querySelectorAll("[style]")).filter((el) =>
-      (el.style.top || el.style.left) &&
-      !el.closest(".colloquium-place-layer") &&
-      !isEditorNode(el) && !el.closest(".ce-box") &&
-      el.tagName !== "SECTION"
-    );
-  }
-
-  function htmlAbsOf(target) {
-    let el = target;
-    while (el && el !== state.slide) {
-      if ((el.style.top || el.style.left) && !el.closest(".colloquium-place-layer") && !isEditorNode(el)) return el;
-      el = el.parentElement;
-    }
-    return null;
-  }
-
-  function flowImgEls() {
-    const content = state.slide.querySelector(".slide-content");
-    if (!content) return [];
-    return Array.from(content.querySelectorAll("img")).filter((img) =>
-      !img.closest(".colloquium-place") && !img.classList.contains("colloquium-chart-print")
-    );
+    return cls.split(" ").some((c) => c.startsWith("ce-")) && !cls.includes("ce-hover") && !cls.includes("ce-selected-flow");
   }
 
   function cellEls() {
@@ -171,7 +146,6 @@
       const cls = el.classList;
       if (cls.contains("colloquium-place-layer") || cls.contains("colloquium-place")) return false;
       if (cls.contains("colloquium-citations") || cls.contains("slide-footnotes")) return false;
-      if (el.style && (el.style.top || el.style.left)) return false; // positioned html
       return true;
     });
   }
@@ -185,9 +159,10 @@
     }
     if (sel.kind === "block") {
       const cell = cellEls()[Math.floor(sel.index / 100)];
-      return cell ? blocksIn(cell)[sel.index % 100] || null : null;
+      const blk = cell ? blocksIn(cell)[sel.index % 100] || null : null;
+      if (blk && sel.img !== undefined && sel.img !== null) return blk.querySelectorAll("img")[sel.img] || blk;
+      return blk;
     }
-    if (sel.kind === "img") return flowImgEls()[sel.index] || null;
     return content;
   }
 
@@ -195,12 +170,7 @@
     if (!sel) return null;
     if (sel.kind === "place") return placeEl(sel.index);
     if (sel.kind === "master") return state.slide.querySelector('.colloquium-place--master[data-master-index="' + sel.index + '"]');
-    if (sel.kind === "html") return htmlAbsEls()[sel.index] || null;
     return flowTarget(sel);
-  }
-
-  function markHtmlAbs() {
-    htmlAbsEls().forEach((el) => el.classList.add("ce-html-abs"));
   }
 
   // ---------- hit testing ----------
@@ -212,17 +182,11 @@
     const place = target.closest(".colloquium-place");
     if (place) return { kind: "place", index: parseInt(place.dataset.placeIndex, 10) };
     if (target.closest(".ce-box")) return state.selection;
-    const abs = htmlAbsOf(target);
-    if (abs) return { kind: "html", index: htmlAbsEls().indexOf(abs) };
     const heading = target.closest("h1, h2");
     if (heading && heading.parentElement === state.slide) return { kind: "title", index: 0 };
     const content = state.slide.querySelector(".slide-content");
     if (content && content.contains(target)) {
       const img = target.closest("img");
-      if (img) {
-        const k = flowImgEls().indexOf(img);
-        if (k >= 0) return { kind: "img", index: k };
-      }
       const cells = cellEls();
       const single = cells.length === 1 && cells[0] === content;
       for (let i = 0; i < cells.length; i++) {
@@ -230,7 +194,10 @@
         const blocks = blocksIn(cells[i]);
         for (let b = 0; b < blocks.length; b++) {
           if (blocks[b].contains(target)) {
-            return { kind: "block", index: i * 100 + b, cell: i, block: b, count: blocks.length };
+            const hit = { kind: "block", index: i * 100 + b, cell: i, block: b, count: blocks.length };
+            const k = img ? Array.from(blocks[b].querySelectorAll("img")).indexOf(img) : -1;
+            if (k >= 0) hit.img = k;
+            return hit;
           }
         }
         return single ? { kind: "content", index: 0 } : { kind: "cell", index: i };
@@ -285,9 +252,7 @@
     if (state.selection && state.selection.kind === "master") {
       box.classList.add("ce-box--locked");
       ro.textContent = "theme element: double-click to edit it on the theme slide";
-    } else if (state.selection && state.selection.kind === "html") {
-      ro.textContent = `left ${Math.round(p.x * PX_W)}px  top ${Math.round(p.y * PX_H)}px  w ${Math.round(p.w * PX_W)}px`;
-    } else if (state.selection && state.selection.kind === "img") {
+    } else if (state.selection && state.selection.kind === "block" && state.selection.img !== undefined && state.selection.img !== null) {
       ro.textContent = `inline image  w ${Math.round(p.w * PX_W)}px  h ${Math.round(p.h * PX_H)}px  (drag to place freely)`;
     } else if (state.selection && state.selection.kind === "block") {
       ro.textContent = `inline block  (drag or resize to place freely)`;
@@ -341,7 +306,7 @@
       drawExtraBoxes();
       return;
     }
-    if (isMovable(sel) || sel.kind === "img" || sel.kind === "block" || sel.kind === "master") {
+    if (isMovable(sel) || sel.kind === "block" || sel.kind === "master") {
       const el = elOf(sel);
       if (el) updateBox(el);
       drawExtraBoxes();
@@ -379,12 +344,13 @@
     const sel = state.selection || { kind: "slide", index: 0 };
     const payload = { kind: sel.kind, index: sel.index, extra: state.extra.slice() };
     const el = elOf(sel);
-    if (el && (sel.kind === "img" || sel.kind === "block")) payload.box = elPercentBox(el);
+    if (el && sel.kind === "block") payload.box = elPercentBox(el);
     if (sel.kind === "block") {
       payload.cell = Math.floor(sel.index / 100);
       payload.block = sel.index % 100;
       const cont = cellEls()[payload.cell];
       payload.count = cont ? blocksIn(cont).length : 0;
+      if (sel.img !== undefined && sel.img !== null) payload.img = sel.img;
     }
     if (el && sel.kind !== "slide") {
       payload.font = parseFloat(state.doc.defaultView.getComputedStyle(el).fontSize) || 0;
@@ -525,14 +491,16 @@
   }
 
   // ---------- geometry updates (batched) ----------
+  function blockPayload(sel) {
+    const cell = Math.floor(sel.index / 100);
+    const cont = cellEls()[cell];
+    const payload = { cell: cell, block: sel.index % 100, count: cont ? blocksIn(cont).length : 0 };
+    if (sel.img !== undefined && sel.img !== null) payload.img = sel.img;
+    return payload;
+  }
+
   function geometryItem(sel, el, box, opts) {
     opts = opts || {};
-    if (sel.kind === "html") {
-      const item = { kind: "html", index: sel.index, left: Math.round(box.x * PX_W), top: Math.round(box.y * PX_H) };
-      if (opts.width) item.width = Math.round(box.w * PX_W);
-      if (opts.height) item.height = Math.round(box.h * PX_H);
-      return item;
-    }
     const item = { kind: "place", index: sel.index, x: round(box.x), y: round(box.y) };
     if (opts.width || el.style.width) item.w = round(box.w);
     const autoHeight = !el.style.height || el.getAttribute("data-auto-height") === "1";
@@ -546,17 +514,10 @@
 
   function applyBoxToEl(sel, el, box, opts) {
     opts = opts || {};
-    if (sel.kind === "html") {
-      el.style.left = Math.round(box.x * PX_W) + "px";
-      el.style.top = Math.round(box.y * PX_H) + "px";
-      if (opts.width) { el.style.maxWidth = "none"; el.style.width = Math.round(box.w * PX_W) + "px"; }
-      if (opts.height) el.style.height = Math.round(box.h * PX_H) + "px";
-    } else {
-      el.style.left = box.x + "%";
-      el.style.top = box.y + "%";
-      if (opts.width) el.style.width = box.w + "%";
-      if (opts.height) el.style.height = box.h + "%";
-    }
+    el.style.left = box.x + "%";
+    el.style.top = box.y + "%";
+    if (opts.width) el.style.width = box.w + "%";
+    if (opts.height) el.style.height = box.h + "%";
   }
 
   // ---------- mouse ----------
@@ -604,28 +565,16 @@
     if (el && state.slide.contains(el)) {
       sel = { kind: "place", index: parseInt(el.dataset.placeIndex, 10) };
     } else {
-      el = htmlAbsOf(e.target);
-      if (!el) {
-        const img = e.target.closest("img");
-        const k = img ? flowImgEls().indexOf(img) : -1;
-        if (k < 0) {
-          const hit = hitTest(e.target);
-          if (!hit || hit.kind !== "block") return;
-          if (!sameSel(state.selection, hit)) select(hit, true, false, e.altKey);
-          const bel = elOf(hit);
-          if (!bel) return;
-          e.preventDefault();
-          state.drag = { mode: "move-block", el: bel, sel: hit, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(bel), moved: false };
-          return;
-        }
-        // Dragging an inline image lifts it out of the flow: on drop it becomes
-        // a placed image at the drop position.
-        if (!sameSel(state.selection, { kind: "img", index: k })) select({ kind: "img", index: k }, true);
-        e.preventDefault();
-        state.drag = { mode: "move-img", el: img, index: k, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(img), moved: false };
-        return;
-      }
-      sel = { kind: "html", index: htmlAbsEls().indexOf(el) };
+      // Dragging a flow block or an inline image lifts it out of the flow: on
+      // drop it becomes a placed element at the drop position.
+      const hit = hitTest(e.target);
+      if (!hit || hit.kind !== "block") return;
+      if (!sameSel(state.selection, hit) || state.selection.img !== hit.img) select(hit, true, false, e.altKey);
+      const bel = elOf(hit);
+      if (!bel) return;
+      e.preventDefault();
+      state.drag = { mode: "move-block", el: bel, sel: hit, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(bel), moved: false };
+      return;
     }
     if (e.shiftKey) return; // shift-click toggles membership on click
     const inGroup = allSelected().some((s) => sameSel(s, sel));
@@ -648,7 +597,7 @@
       const members = allSelected().map((s) => ({ sel: s, el: elOf(s) })).filter((m) => m.el);
       members.forEach((m) => {
         m.orig = elPercentBox(m.el);
-        m.autoHeight = m.sel.kind === "html" || !m.el.style.height || m.el.getAttribute("data-auto-height") === "1";
+        m.autoHeight = !m.el.style.height || m.el.getAttribute("data-auto-height") === "1";
       });
       const gb = groupBBox();
       state.drag = {
@@ -657,22 +606,16 @@
       };
       return;
     }
-    if (!isMovable(state.selection) && state.selection.kind !== "img" && state.selection.kind !== "block") return;
+    if (!isMovable(state.selection) && state.selection.kind !== "block") return;
     const el = elOf(state.selection);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
     const box = elPercentBox(el);
     if (state.selection.kind === "block") {
+      const isImg = state.selection.img !== undefined && state.selection.img !== null;
       state.drag = {
-        mode: "resize-block", handle: e.currentTarget.dataset.handle, el: el, sel: state.selection,
-        start: toPercent(e.clientX, e.clientY), orig: box, moved: false,
-      };
-      return;
-    }
-    if (state.selection.kind === "img") {
-      state.drag = {
-        mode: "resize-img", handle: e.currentTarget.dataset.handle, el: el, index: state.selection.index,
+        mode: isImg ? "resize-img" : "resize-block", handle: e.currentTarget.dataset.handle, el: el, sel: state.selection,
         start: toPercent(e.clientX, e.clientY), orig: box, moved: false, aspect: box.h > 0 ? box.w / box.h : 1,
       };
       return;
@@ -680,7 +623,7 @@
     state.drag = {
       mode: "resize", handle: e.currentTarget.dataset.handle, el: el, sel: state.selection,
       start: toPercent(e.clientX, e.clientY), orig: box, moved: false,
-      autoHeight: state.selection.kind === "html" || !el.style.height || el.getAttribute("data-auto-height") === "1",
+      autoHeight: !el.style.height || el.getAttribute("data-auto-height") === "1",
       isImage: el.classList.contains("colloquium-place--image"),
       aspect: box.h > 0 ? box.w / box.h : 1,
     };
@@ -703,19 +646,11 @@
     if (!d.moved) {
       const dc = state.downClient || { x: e.clientX, y: e.clientY };
       const dist = Math.hypot(e.clientX - dc.x, e.clientY - dc.y);
-      const need = (d.mode === "move-block" || d.mode === "move-img") ? 10 : 4;
+      const need = d.mode === "move-block" ? 10 : 4;
       if (dist < need) return;
       d.moved = true;
     }
 
-    if (d.mode === "move-img") {
-      d.el.style.transform = `translate(${dx * PX_W}px, ${dy * PX_H}px)`;
-      d.el.style.position = "relative";
-      d.el.style.zIndex = "50";
-      d.last = { x: d.orig.x + dx, y: d.orig.y + dy, w: d.orig.w, h: d.orig.h };
-      updateBox(d.el);
-      return;
-    }
     if (d.mode === "move-block") {
       d.el.style.transform = `translate(${dx * PX_W}px, ${dy * PX_H}px)`;
       d.el.style.position = "relative";
@@ -837,11 +772,7 @@
     w = snap(w); h = snap(h); x = snap(x); y = snap(y);
     const vertical = hnd.includes("n") || hnd.includes("s");
     d.heightExplicit = (!d.autoHeight || vertical) && !(d.isImage && hnd.length === 2 && d.autoHeight);
-    if (d.sel.kind === "html") {
-      applyBoxToEl(d.sel, d.el, { x, y, w, h }, { width: true, height: vertical });
-    } else {
-      applyBoxToEl(d.sel, d.el, { x, y, w, h }, { width: true, height: true });
-    }
+    applyBoxToEl(d.sel, d.el, { x, y, w, h }, { width: true, height: true });
     d.last = { x, y, w, h };
     updateBox(d.el);
     showGuides(x, y, w, h);
@@ -853,21 +784,24 @@
     state.drag = null;
     if (state.guides) { state.guides.v.style.display = "none"; state.guides.h.style.display = "none"; }
     if (!d.moved) {
-      if (d.mode === "move-img" || d.mode === "move-block" || d.mode === "resize-block") {
+      if (d.mode === "move-block" || d.mode === "resize-block") {
         d.el.style.transform = ""; d.el.style.position = ""; d.el.style.zIndex = "";
         if (d.mode === "resize-block") { d.el.style.width = ""; d.el.style.maxWidth = ""; }
       }
       return;
     }
     state.suppressClick = Date.now();
-    if (d.mode === "move-block" || d.mode === "resize-block") {
+    if (d.mode === "move-block" || d.mode === "resize-block" || d.mode === "resize-img") {
       const p = d.last || d.orig;
-      const cell = Math.floor(d.sel.index / 100);
-      const cont = cellEls()[cell];
-      emit(d.mode === "move-block" ? "ce-block-move" : "ce-block-resize", {
-        cell: cell, block: d.sel.index % 100, count: cont ? blocksIn(cont).length : 0,
-        x: round(p.x), y: round(p.y), w: round(p.w),
-      });
+      const payload = blockPayload(d.sel);
+      if (d.mode === "resize-img") {
+        if (d.last && d.last.width) payload.width = Math.round(d.last.width);
+        if (d.last && d.last.height) payload.height = Math.round(d.last.height);
+        emit("ce-block-image-size", payload);
+        return;
+      }
+      payload.x = round(p.x); payload.y = round(p.y); payload.w = round(p.w);
+      emit(d.mode === "move-block" ? "ce-block-move" : "ce-block-resize", payload);
       return;
     }
     if (d.mode === "resize-group") {
@@ -876,18 +810,6 @@
     }
     if (d.mode === "cell-divider") {
       emit("ce-cell-resize", { axis: d.axis, row: d.row, fractions: d.tracks || d.orig });
-      return;
-    }
-    if (d.mode === "move-img") {
-      const p = d.last || d.orig;
-      emit("ce-img-move", { index: d.index, x: round(p.x), y: round(p.y), w: round(p.w) });
-      return;
-    }
-    if (d.mode === "resize-img") {
-      const payload = { index: d.index };
-      if (d.last && d.last.width) payload.width = Math.round(d.last.width);
-      if (d.last && d.last.height) payload.height = Math.round(d.last.height);
-      emit("ce-img-size", payload);
       return;
     }
     if (d.mode === "move") {
@@ -1013,7 +935,7 @@
 
   // ---------- in-place source editor ----------
   function requestEdit(sel) {
-    if (!sel || sel.kind === "slide" || sel.kind === "img" || sel.kind === "master") return;
+    if (!sel || sel.kind === "slide" || sel.kind === "master") return;
     const el = elOf(sel);
     if (!el) return;
     if (sel.kind === "place" && el.classList.contains("colloquium-place--image")) return;
@@ -1081,7 +1003,7 @@
   };
 
   function wrapSelection(ta, kind, fmt) {
-    const m = (kind === "html" ? MARKS.html : MARKS.md)[fmt];
+    const m = MARKS.md[fmt];
     if (!m) return;
     const a = ta.selectionStart, b = ta.selectionEnd;
     const v = ta.value;
@@ -1285,7 +1207,6 @@
       clearExtraBoxes();
       clearDividers();
       state.slide = next;
-      if (state.slide) markHtmlAbs();
       applySelection();
     };
     refreshSlide();
@@ -1320,7 +1241,6 @@
     openEditor(sel, value) { openEditor(sel, value); },
     align(mode) { align(mode); },
     distribute(axis) { distribute(axis); },
-    htmlAbsCount() { return state.slide ? htmlAbsEls().length : 0; },
     format(fmt) { format(fmt); },
     cropEnter() { cropEnter(); },
     cropCommit() { cropCommit(); },
@@ -1333,12 +1253,9 @@
       const el = elOf(sel);
       if (!el) return;
       const b = elPercentBox(el);
-      const cell = Math.floor(sel.index / 100);
-      const cont = cellEls()[cell];
-      emit("ce-block-move", {
-        cell: cell, block: sel.index % 100, count: cont ? blocksIn(cont).length : 0,
-        x: round(b.x), y: round(b.y), w: round(b.w),
-      });
+      const payload = blockPayload(sel);
+      payload.x = round(b.x); payload.y = round(b.y); payload.w = round(b.w);
+      emit("ce-block-move", payload);
     },
   };
 })();

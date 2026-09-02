@@ -181,7 +181,7 @@ class SlideChunk:
         """
         start, end = self._body_span()
         body = self.text[start:end]
-        masked = body
+        masked = _mask_fences(body)
         for ref in self._place_refs_in(body):
             masked = masked[: ref.start] + " " * (ref.end - ref.start) + masked[ref.end:]
         cuts = sorted(
@@ -197,17 +197,8 @@ class SlideChunk:
         return spans
 
     def _kept_spans(self, text: str) -> list[tuple[int, int]]:
-        """Spans of blocks the cell editor hides but must preserve.
-
-        Place blocks and px-positioned HTML elements have their own editing
-        paths; cell text editing works on everything else.
-        """
-        spans = [(r.start, r.end) for r in self._place_refs_in(text)]
-        masked = text
-        for a, b in spans:
-            masked = masked[:a] + " " * (b - a) + masked[b:]
-        spans += [(m.start(), m.end()) for m in _HTML_ABS_RE.finditer(masked)]
-        return sorted(spans)
+        """Spans the cell editor hides but must preserve: the place blocks."""
+        return [(r.start, r.end) for r in self._place_refs_in(text)]
 
     def get_cell(self, i: int) -> str:
         s, e = self.cell_spans()[i]
@@ -220,7 +211,7 @@ class SlideChunk:
         spans = self.cell_spans()
         s, e = spans[i]
         old = self.text[s:e]
-        # keep the place blocks / positioned HTML that live in this cell
+        # keep the place blocks that live in this cell
         kept_spans = self._kept_spans(old)
         kept = "\n".join(old[a:b].strip("\n") for a, b in kept_spans)
         value = value.strip("\n")
@@ -283,73 +274,149 @@ class SlideChunk:
         self.set_cell_style(i, update_style(self.get_cell_style(i), **props))
 
     # ----- flow blocks (markdown blocks as objects) ---------------------------
-    @staticmethod
-    def _block_spans_in(masked: str) -> list[tuple[int, int]]:
-        """Spans of blank-line separated blocks, fence-aware, relative to *masked*."""
-        spans: list[tuple[int, int]] = []
-        offset = 0
-        start = None
-        end = 0
-        fence = False
-        for line in masked.splitlines(keepends=True):
-            stripped = line.strip()
-            if not stripped and not fence:
-                if start is not None:
-                    spans.append((start, end))
-                    start = None
-            else:
-                if start is None:
-                    start = offset
-                end = offset + len(line.rstrip("\n"))
-                if stripped.startswith("```") or stripped.startswith("~~~"):
-                    fence = not fence
-            offset += len(line)
-        if start is not None:
-            spans.append((start, end))
-        return spans
+    # ----- flow blocks (what the browser renders as top-level elements) ------
+    def cell_blocks(self, i: int) -> list["Block"]:
+        """The blocks of cell *i*, in the order the browser renders them.
 
-    def cell_flow_blocks(self, i: int) -> list[tuple[int, int]]:
-        """Absolute spans of the visible markdown blocks in cell *i*.
-
-        Skips place blocks, positioned HTML and comment/directive-only blocks,
-        matching the top-level elements the browser renders for the cell.
+        Uses markdown-it's own block tokenizer so the list matches the
+        rendered top-level elements one to one; raw HTML blocks are split
+        into their top-level elements. Place blocks are masked out (they
+        render into their own layer) and comments render nothing.
         """
         s, e = self.cell_spans()[i]
         seg = self.text[s:e]
         masked = seg
         for a, b in self._kept_spans(seg):
-            masked = masked[:a] + " " * (b - a) + masked[b:]
-        masked = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), masked, flags=re.DOTALL)
-        out = []
-        for a, b in self._block_spans_in(masked):
-            visible = re.sub(r"<!--.*?-->", "", masked[a:b], flags=re.DOTALL)
-            if not visible.strip():
+            masked = masked[:a] + re.sub(r"[^\n]", " ", masked[a:b]) + masked[b:]
+        line_starts = [0] + [m.end() for m in re.finditer(r"\n", masked)]
+
+        def span(a: int, b: int) -> tuple[int, int]:
+            start = line_starts[a] if a < len(line_starts) else len(masked)
+            end = line_starts[b] if b < len(line_starts) else len(masked)
+            while end > start and masked[end - 1] in " \t\n":
+                end -= 1
+            while start < end and masked[start] in " \t":
+                start += 1
+            return start, end
+
+        out: list[Block] = []
+        for t in _md().parse(masked):
+            if t.level != 0 or t.nesting == -1 or t.map is None:
                 continue
-            out.append((s + a, s + b))
+            a, b = span(t.map[0], t.map[1])
+            if b <= a:
+                continue
+            if t.type == "html_block":
+                out.extend(_html_elements(masked, a, b))
+            else:
+                out.append(Block(a, b, "md"))
+        for blk in out:
+            blk.start += s
+            blk.end += s
+            blk.inner_start += s
+            blk.inner_end += s
         return out
 
+    def cell_flow_blocks(self, i: int) -> list[tuple[int, int]]:
+        return [(b.start, b.end) for b in self.cell_blocks(i)]
+
     def get_cell_block(self, i: int, j: int) -> str:
-        a, b = self.cell_flow_blocks(i)[j]
-        return self.text[a:b]
+        blk = self.cell_blocks(i)[j]
+        return self.text[blk.start:blk.end]
 
     def set_cell_block(self, i: int, j: int, value: str) -> None:
-        a, b = self.cell_flow_blocks(i)[j]
-        self.text = re.sub(r"\n{3,}", "\n\n", self.text[:a] + value.strip("\n") + self.text[b:]).strip("\n")
+        blk = self.cell_blocks(i)[j]
+        value = value.strip("\n")
+        if value:
+            self.text = self.text[: blk.start] + value + self.text[blk.end :]
+        else:
+            self._delete_span(blk.start, blk.end)
+        self.text = self.text.strip("\n")
 
     def remove_cell_block(self, i: int, j: int) -> None:
-        a, b = self.cell_flow_blocks(i)[j]
-        self.text = re.sub(r"\n{3,}", "\n\n", self.text[:a] + self.text[b:]).strip("\n")
+        blk = self.cell_blocks(i)[j]
+        self._delete_span(blk.start, blk.end)
+        self.text = self.text.strip("\n")
 
     def convert_cell_block_to_place(self, i: int, j: int, x: float, y: float, w: float) -> int:
-        """Lift a flow block out of the cell into a ```place block."""
-        block = self.get_cell_block(i, j).strip("\n")
-        self.remove_cell_block(i, j)
+        """Lift a flow block out of the cell into a ```place block.
+
+        A px-positioned HTML element keeps its own position, classes and
+        remaining style; an image-only block becomes a placed image; anything
+        else becomes placed text at the given box.
+        """
+        blk = self.cell_blocks(i)[j]
+        text = self.text[blk.start:blk.end].strip("\n")
         spec = place.PlaceSpec(x=round(x, 1), y=round(y, 1), w=round(w, 1))
-        m = _MD_IMAGE_RE.fullmatch(block.strip())
-        if m:
-            spec.src = m.group("src")
+        if blk.kind == "html" and blk.positioned:
+            spec.x = round((blk.px("left") or 0) / 12.8, 1)
+            spec.y = round((blk.px("top") or 0) / 7.2, 1)
+            width = blk.px("width") or blk.px("max-width")
+            spec.w = round(width / 12.8, 1) if width else None
+            spec.text = self.text[blk.inner_start:blk.inner_end].strip() + "\n"
+            spec.classes = blk.classes
+            keep = [(k, v) for k, v in parse_inline_style(blk.style) if k not in {"position", "top", "left", "width", "max-width"}]
+            if keep:
+                spec.style = format_inline_style(keep)
         else:
-            spec.text = block + "\n"
+            m = _MD_IMAGE_RE.fullmatch(text) or _HTML_IMG_RE.fullmatch(text)
+            if m:
+                spec.src = m.group("src")
+            else:
+                spec.text = text + "\n"
+        self._delete_span(blk.start, blk.end)
+        self.text = self.text.strip("\n")
+        return self.add_place(spec)
+
+    # ----- images inside a block ----------------------------------------------
+    def block_images(self, i: int, j: int) -> list[tuple[int, int, str]]:
+        """(start, end, src) of the images inside block *j*, in DOM order."""
+        blk = self.cell_blocks(i)[j]
+        seg = self.text[blk.start:blk.end]
+        found = [(m.start(), m.end(), m.group("src")) for m in _MD_IMAGE_RE.finditer(seg)]
+        found += [(m.start(), m.end(), m.group("src")) for m in _HTML_IMG_RE.finditer(seg)]
+        return [(blk.start + a, blk.start + b, src) for a, b, src in sorted(found)]
+
+    def set_block_image_size(self, i: int, j: int, k: int, width_px: float | None = None, height_px: float | None = None) -> None:
+        """Resize an inline image by writing an explicit width or height.
+
+        Markdown images become ``<img>`` tags (markdown has no size syntax);
+        the other dimension is cleared so the aspect ratio is preserved.
+        """
+        start, end, src = self.block_images(i, j)[k]
+        raw = self.text[start:end]
+        props: dict[str, str | None] = {}
+        if width_px is not None:
+            props.update(width=f"{int(round(width_px))}px", height=None)
+        if height_px is not None:
+            props.update(height=f"{int(round(height_px))}px", width=None)
+        m = _HTML_IMG_RE.fullmatch(raw)
+        if m:
+            sm = re.search(r'\sstyle="([^"]*)"', raw)
+            if sm:
+                new_style = update_style(sm.group(1), **props)
+                tag = raw[: sm.start()] + f' style="{new_style}"' + raw[sm.end():]
+            else:
+                new_style = update_style("", **props)
+                tag = raw[:-1].rstrip("/").rstrip() + f' style="{new_style}">'
+        else:
+            mm = _MD_IMAGE_RE.fullmatch(raw)
+            alt = re.match(r"!\[([^\]]*)\]", raw).group(1) if mm else ""
+            alt_attr = f' alt="{alt}"' if alt else ""
+            tag = f'<img src="{src}"{alt_attr} style="{update_style("", **props)}">'
+        self.text = self.text[:start] + tag + self.text[end:]
+
+    def convert_block_image_to_place(self, i: int, j: int, k: int, x: float, y: float, w: float) -> int:
+        """Lift one image out of a block into a placed image at the given box."""
+        blk = self.cell_blocks(i)[j]
+        start, end, src = self.block_images(i, j)[k]
+        rest = (self.text[blk.start:start] + self.text[end:blk.end]).strip()
+        spec = place.PlaceSpec(x=round(x, 1), y=round(y, 1), w=round(w, 1), src=src)
+        if rest:
+            self.text = self.text[:start] + self.text[end:]
+        else:
+            self._delete_span(blk.start, blk.end)
+        self.text = self.text.strip("\n")
         return self.add_place(spec)
 
     # ----- rows and grid fractions --------------------------------------------
@@ -406,56 +473,6 @@ class SlideChunk:
         self.text = self.text[: ref.start] + block + trail + self.text[ref.end :]
 
     # ----- raw absolutely positioned HTML ---------------------------------------
-    def html_abs_refs(self) -> list[HtmlAbsRef]:
-        refs = []
-        masked = self.text
-        for r in self._place_refs_in(self.text):
-            masked = masked[: r.start] + " " * (r.end - r.start) + masked[r.end :]
-        for i, m in enumerate(_HTML_ABS_RE.finditer(masked)):
-            refs.append(
-                HtmlAbsRef(
-                    i, m.start(), m.end(), m.group("tag"), m.group("attrs"), m.group("style"),
-                    m.group("inner"), m.start("inner"), m.end("inner"),
-                )
-            )
-        return refs
-
-    def set_html_abs_style(self, i: int, **props: str | None) -> None:
-        """Update inline style declarations (value None removes the key)."""
-        ref = self.html_abs_refs()[i]
-        new_style = update_style(ref.style, **props)
-        # replace only the style attribute value inside the opening tag
-        tag_text = self.text[ref.start : ref.end]
-        tag_text = tag_text.replace(f'style="{ref.style}"', f'style="{new_style}"', 1)
-        self.text = self.text[: ref.start] + tag_text + self.text[ref.end :]
-
-    def set_html_abs_inner(self, i: int, inner: str) -> None:
-        ref = self.html_abs_refs()[i]
-        self.text = self.text[: ref.inner_start] + inner + self.text[ref.inner_end :]
-
-    def convert_html_abs_to_place(self, i: int) -> int:
-        """Replace a px-positioned HTML element with an equivalent place block."""
-        ref = self.html_abs_refs()[i]
-        spec = place.PlaceSpec(
-            x=round((ref.left_px or 0) / 12.8, 1),
-            y=round((ref.top_px or 0) / 7.2, 1),
-            w=round(ref.width_px / 12.8, 1) if ref.width_px else None,
-            text=ref.inner.strip() + "\n",
-            classes=ref.classes,
-        )
-        keep = [
-            (k, v) for k, v in ref.decls
-            if k not in {"position", "top", "left", "width", "max-width"}
-        ]
-        if keep:
-            spec.style = format_inline_style(keep)
-        before = self.text[: ref.start].rstrip(" \t")
-        after = self.text[ref.end :]
-        head = before.rstrip("\n") + "\n\n"
-        self.text = re.sub(r"\n{3,}", "\n\n", head + spec.to_markdown() + "\n" + after.lstrip(" \t")).strip("\n")
-        # the new block sits after every place block that preceded the element
-        return len(self._place_refs_in(before))
-
     # ----- stacking order (later in source = drawn on top) ----------------------
     def _swap_spans(self, a: tuple[int, int], b: tuple[int, int]) -> None:
         """Swap two non-overlapping source spans, keeping everything between."""
@@ -479,16 +496,6 @@ class SlideChunk:
             i += step
         return i
 
-    def reorder_html_abs(self, i: int, new_index: int) -> int:
-        refs = self.html_abs_refs()
-        new_index = max(0, min(new_index, len(refs) - 1))
-        step = 1 if new_index > i else -1
-        while i != new_index:
-            refs = self.html_abs_refs()
-            self._swap_spans((refs[i].start, refs[i].end), (refs[i + step].start, refs[i + step].end))
-            i += step
-        return i
-
     def duplicate_place(self, i: int, dx: float = 2.0, dy: float = 2.0) -> int:
         ref = self.place_refs()[i]
         spec = place.parse_spec(ref.spec.to_yaml())
@@ -501,79 +508,11 @@ class SlideChunk:
         self.text = self.text[:end] + "\n\n" + block + self.text[end:]
         return i + 1
 
-    def duplicate_html_abs(self, i: int, dx: float = 20, dy: float = 20) -> int:
-        ref = self.html_abs_refs()[i]
-        raw = self.text[ref.start : ref.end]
-        self.text = self.text[: ref.end] + "\n" + raw + self.text[ref.end :]
-        j = i + 1
-        self.set_html_abs_style(
-            j,
-            left=f"{int((ref.left_px or 0) + dx)}px",
-            top=f"{int((ref.top_px or 0) + dy)}px",
-        )
-        return j
-
     def append_raw(self, block: str) -> None:
         """Append a raw block (place block or HTML) to the end of the slide."""
         self.text = self.text.rstrip("\n") + "\n\n" + block.strip("\n")
 
     # ----- inline markdown / html images in the flow ---------------------------
-    def flow_image_refs(self) -> list[tuple[int, int, str]]:
-        """(start, end, src) of ``![alt](src)`` and ``<img src>`` outside place blocks."""
-        masked = self.text
-        for r in self._place_refs_in(self.text):
-            masked = masked[: r.start] + " " * (r.end - r.start) + masked[r.end :]
-        found = []
-        for m in _MD_IMAGE_RE.finditer(masked):
-            found.append((m.start(), m.end(), m.group("src")))
-        for m in _HTML_IMG_RE.finditer(masked):
-            found.append((m.start(), m.end(), m.group("src")))
-        return sorted(found)
-
-    def set_flow_image_size(self, k: int, width_px: float | None = None, height_px: float | None = None) -> None:
-        """Resize an inline image in the flow by writing an explicit width or height.
-
-        Markdown images become ``<img>`` tags (markdown has no size syntax);
-        the other dimension is cleared so the aspect ratio is preserved.
-        """
-        start, end, src = self.flow_image_refs()[k]
-        raw = self.text[start:end]
-        props: dict[str, str | None] = {}
-        if width_px is not None:
-            props.update(width=f"{int(round(width_px))}px", height=None)
-        if height_px is not None:
-            props.update(height=f"{int(round(height_px))}px", width=None)
-        m = _HTML_IMG_RE.fullmatch(raw)
-        if m:
-            sm = re.search(r'\sstyle="([^"]*)"', raw)
-            if sm:
-                new_style = update_style(sm.group(1), **props)
-                tag = raw[: sm.start()] + f' style="{new_style}"' + raw[sm.end():]
-            else:
-                new_style = update_style("", **props)
-                tag = raw[:-1].rstrip("/").rstrip() + f' style="{new_style}">'
-        else:
-            mm = _MD_IMAGE_RE.fullmatch(raw)
-            alt = re.match(r"!\[([^\]]*)\]", raw).group(1) if mm else ""
-            alt_attr = f' alt="{alt}"' if alt else ""
-            tag = f'<img src="{src}"{alt_attr} style="{update_style("", **props)}">'
-        self.text = self.text[:start] + tag + self.text[end:]
-
-    def convert_flow_image_to_place(self, k: int, x: float, y: float, w: float) -> int:
-        start, end, src = self.flow_image_refs()[k]
-        # drop a figure/paragraph wrapper line if the image was alone on it
-        line_start = self.text.rfind("\n", 0, start) + 1
-        line_end = self.text.find("\n", end)
-        line_end = len(self.text) if line_end == -1 else line_end
-        line = self.text[line_start:line_end]
-        if line.strip() == self.text[start:end].strip():
-            start, end = line_start, line_end
-        spec = place.PlaceSpec(x=round(x, 1), y=round(y, 1), w=round(w, 1), src=src)
-        before = self.text[:start].rstrip(" \t")
-        after = self.text[end:]
-        self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + after.lstrip("\n")).strip("\n")
-        return self.add_place(spec)
-
     def set_place_style_props(self, i: int, **props: str | None) -> None:
         """Update CSS declarations in a place block's ``style:`` (None removes)."""
         spec = self.get_place(i)
@@ -590,17 +529,98 @@ class SlideChunk:
         self.text = re.sub(r"\n{3,}", "\n\n", self.text[: ref.start] + self.text[ref.end :]).strip("\n")
 
 
-# Raw HTML elements positioned with inline top/left (e.g. hand-written
-# annotation callouts). Non-nested only: the inner content must not contain
-# another tag of the same name.
-_HTML_ABS_RE = re.compile(
-    r"<(?P<tag>div|span|p)\b(?P<attrs>[^>]*\bstyle=\"(?P<style>[^\"]*(?<![\w-])(?:top|left)\s*:[^\"]*)\"[^>]*)>"
-    r"(?P<inner>(?:(?!<(?P=tag)\b).)*?)</(?P=tag)>",
-    re.DOTALL | re.IGNORECASE,
-)
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\((?P<src>[^)\s]+)(?:\s+\"[^\"]*\")?\)")
 _HTML_IMG_RE = re.compile(r"<img\b[^>]*\bsrc=\"(?P<src>[^\"]+)\"[^>]*>", re.IGNORECASE)
 _CSS_DECL_RE = re.compile(r"\s*([a-zA-Z-]+)\s*:\s*([^;]*?)\s*(?:;|$)")
+
+
+_POS_DECL_RE = re.compile(r"(?<![\w-])(?:top|left)\s*:")
+_TAG_RE = re.compile(r"<!--.*?-->|<(/?)([a-zA-Z][\w-]*)([^<>]*?)(/?)>", re.DOTALL)
+_VOID_TAGS = {"img", "br", "hr", "input", "source", "meta", "link", "area", "base", "col", "embed", "track", "wbr"}
+_md_instance = None
+
+
+def _md():
+    global _md_instance
+    if _md_instance is None:
+        from colloquium.md import create_base_md
+
+        _md_instance = create_base_md()
+    return _md_instance
+
+
+@dataclass
+class Block:
+    """One rendered top-level element of a cell and where it lives in the source."""
+
+    start: int
+    end: int
+    kind: str                 # "md" (markdown block) or "html" (raw element)
+    tag: str = ""
+    attrs: str = ""
+    style: str = ""
+    inner_start: int = 0
+    inner_end: int = 0
+
+    @property
+    def positioned(self) -> bool:
+        return self.kind == "html" and _POS_DECL_RE.search(self.style) is not None
+
+    @property
+    def classes(self) -> list[str]:
+        m = re.search(r"""\bclass\s*=\s*("([^"]*)"|'([^']*)')""", self.attrs)
+        return (m.group(2) or m.group(3) or "").split() if m else []
+
+    def px(self, key: str) -> float | None:
+        return _px(dict(parse_inline_style(self.style)).get(key, ""))
+
+
+def _style_of(attrs: str) -> str:
+    m = re.search(r"""\bstyle\s*=\s*("([^"]*)"|'([^']*)')""", attrs)
+    return (m.group(2) or m.group(3) or "").strip() if m else ""
+
+
+def _html_elements(text: str, a: int, b: int) -> list[Block]:
+    """Top-level elements of the raw HTML in text[a:b] (comments and bare text render no element)."""
+    out: list[Block] = []
+    stack: list[str] = []
+    cur: tuple[int, str, str, int] | None = None
+    for m in _TAG_RE.finditer(text, a, b):
+        if m.group(0).startswith("<!--"):
+            continue
+        closing, tag, attrs, selfclose = m.group(1), m.group(2).lower(), m.group(3), m.group(4)
+        if not closing:
+            if tag in _VOID_TAGS or selfclose:
+                if not stack:
+                    out.append(Block(m.start(), m.end(), "html", tag, attrs, _style_of(attrs), m.end(), m.end()))
+                continue
+            if not stack:
+                cur = (m.start(), tag, attrs, m.end())
+            stack.append(tag)
+        elif tag in stack:
+            while stack and stack.pop() != tag:
+                pass
+            if not stack and cur:
+                out.append(Block(cur[0], m.end(), "html", cur[1], cur[2], _style_of(cur[2]), cur[3], m.start()))
+                cur = None
+    return out
+
+
+def _mask_fences(text: str) -> str:
+    """Blank out the lines inside fenced code so separators there are ignored."""
+    out = []
+    fence = False
+    for line in text.splitlines(keepends=True):
+        stripped = line.strip()
+        is_fence = stripped.startswith("```") or stripped.startswith("~~~")
+        if is_fence:
+            fence = not fence
+            out.append(re.sub(r"[^\n]", " ", line))
+        elif fence:
+            out.append(re.sub(r"[^\n]", " ", line))
+        else:
+            out.append(line)
+    return "".join(out)
 
 
 def parse_inline_style(style: str) -> list[tuple[str, str]]:
@@ -641,48 +661,6 @@ def format_grid_fractions(fractions: list[float]) -> str:
 def _px(value: str) -> float | None:
     m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*px\s*", value or "")
     return float(m.group(1)) if m else None
-
-
-@dataclass
-class HtmlAbsRef:
-    """A raw HTML element with inline top/left, and its source span."""
-
-    index: int
-    start: int
-    end: int
-    tag: str
-    attrs: str
-    style: str
-    inner: str
-    inner_start: int
-    inner_end: int
-
-    @property
-    def classes(self) -> list[str]:
-        m = re.search(r'\bclass="([^"]*)"', self.attrs)
-        return m.group(1).split() if m else []
-
-    @property
-    def decls(self) -> list[tuple[str, str]]:
-        return parse_inline_style(self.style)
-
-    def get(self, key: str) -> str | None:
-        for k, v in self.decls:
-            if k == key:
-                return v
-        return None
-
-    @property
-    def left_px(self) -> float | None:
-        return _px(self.get("left") or "")
-
-    @property
-    def top_px(self) -> float | None:
-        return _px(self.get("top") or "")
-
-    @property
-    def width_px(self) -> float | None:
-        return _px(self.get("width") or "") or _px(self.get("max-width") or "")
 
 
 @dataclass

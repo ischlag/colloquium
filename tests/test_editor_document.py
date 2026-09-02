@@ -194,92 +194,6 @@ DeepSeek
 """
 
 
-def test_html_abs_refs_and_style_update():
-    doc = DeckDocument.from_text(ANNO_DECK)
-    chunk = doc.slides[0]
-    refs = chunk.html_abs_refs()
-    assert [(r.left_px, r.top_px, r.width_px) for r in refs] == [(40, 368, 300), (396, 615, 330)]
-    assert refs[0].classes == ["anno"]
-    chunk.set_html_abs_style(1, left="525px", top="472px", width="250px", **{"max-width": None})
-    assert 'style="top: 472px; left: 525px; width: 250px"' in chunk.text
-    chunk.set_html_abs_inner(0, "Edited <b>inner</b>")
-    assert chunk.html_abs_refs()[0].inner == "Edited <b>inner</b>"
-    # untouched parts are byte-identical
-    assert chunk.text.count("Restrictive licence.") == 1
-    assert "### Closed\n\nOpenAI<br>\nxAI" in chunk.text
-
-
-def test_cell_edit_hides_and_preserves_positioned_html():
-    doc = DeckDocument.from_text(ANNO_DECK)
-    chunk = doc.slides[0]
-    cell = chunk.get_cell(0)
-    assert "anno" not in cell
-    assert cell.startswith("<!-- class: landscape -->")
-    chunk.set_cell(0, cell.replace("xAI", "xAI (Grok)"))
-    expected = ANNO_DECK.replace("xAI\n", "xAI (Grok)\n").strip("\n")
-    assert chunk.text == expected
-    chunk.set_cell(0, chunk.get_cell(0))
-    assert chunk.text == expected
-
-
-def test_convert_html_abs_to_place():
-    doc = DeckDocument.from_text(ANNO_DECK)
-    chunk = doc.slides[0]
-    idx = chunk.convert_html_abs_to_place(1)
-    assert idx == 0
-    spec = chunk.get_place(0)
-    assert spec.classes == ["anno"]
-    assert spec.x == round(396 / 12.8, 1) and spec.y == round(615 / 7.2, 1)
-    assert spec.w == round(330 / 12.8, 1)
-    assert spec.text.strip() == "Restrictive licence."
-    assert len(chunk.html_abs_refs()) == 1
-    assert len(parse_markdown(doc.to_text()).slides) == 1
-
-
-def test_reorder_place_and_html():
-    text = "## T\n\n```place\nx: 1\ny: 1\ntext: |\n  A\n```\n\nmiddle\n\n```place\nx: 2\ny: 2\ntext: |\n  B\n```\n\n```place\nx: 3\ny: 3\ntext: |\n  C\n```"
-    chunk = SlideChunk(text)
-    assert chunk.reorder_place(0, 2) == 2
-    assert [r.spec.text.strip() for r in chunk.place_refs()] == ["B", "C", "A"]
-    assert "\n\nmiddle\n\n" in chunk.text
-    assert chunk.reorder_place(2, 0) == 0
-    assert chunk.text == text
-    doc = DeckDocument.from_text(ANNO_DECK)
-    c = doc.slides[0]
-    c.reorder_html_abs(0, 1)
-    refs = c.html_abs_refs()
-    assert refs[0].inner == "Restrictive licence." and refs[1].inner.endswith("never delivered.")
-    c.reorder_html_abs(1, 0)
-    assert c.text == ANNO_DECK.strip("\n")
-
-
-def test_duplicate_and_paste():
-    doc = DeckDocument.from_text(DECK)
-    chunk = doc.slides[1]
-    j = chunk.duplicate_place(0)
-    assert j == 1
-    refs = chunk.place_refs()
-    assert len(refs) == 2 and refs[1].spec.x == 7 and refs[1].spec.y == 82
-    assert chunk.get_cell(0) == "Left text." and chunk.get_cell(1).startswith("Right text.")
-    c = DeckDocument.from_text(ANNO_DECK).slides[0]
-    j = c.duplicate_html_abs(0)
-    refs = c.html_abs_refs()
-    assert j == 1 and len(refs) == 3 and (refs[1].left_px, refs[1].top_px) == (60, 388)
-    c.append_raw(refs[0].inner and '<div class="anno" style="top: 1px; left: 2px">pasted</div>')
-    assert c.html_abs_refs()[-1].inner == "pasted"
-
-
-def test_convert_flow_image_to_place():
-    chunk = SlideChunk("## T\n\nIntro.\n\n![A figure](images/fig.png)\n\nAfter.")
-    assert [r[2] for r in chunk.flow_image_refs()] == ["images/fig.png"]
-    idx = chunk.convert_flow_image_to_place(0, 10, 20, 40)
-    assert idx == 0
-    assert "![A figure]" not in chunk.text
-    assert chunk.get_cell(0) == "Intro.\n\nAfter."
-    spec = chunk.get_place(0)
-    assert (spec.src, spec.x, spec.y, spec.w) == ("images/fig.png", 10, 20, 40)
-
-
 def test_update_style_and_place_style_props():
     from colloquium.editor.document import update_style
 
@@ -292,17 +206,6 @@ def test_update_style_and_place_style_props():
     assert chunk.get_place(0).style == "color: #e4002b; border: 1px solid #000"
     chunk.set_place_style_props(0, color=None)
     assert chunk.get_place(0).style == "border: 1px solid #000"
-
-
-def test_set_flow_image_size():
-    chunk = SlideChunk("## T\n\n![A figure](images/fig.png)\n\n|||\n\n<img src=\"b.png\" alt=\"B\" style=\"height: 380px; width: auto; border-radius: 8px;\">")
-    chunk.set_flow_image_size(0, width_px=512.4)
-    assert '<img src="images/fig.png" alt="A figure" style="width: 512px">' in chunk.text
-    chunk.set_flow_image_size(1, width_px=300)
-    assert 'style="width: 300px; border-radius: 8px"' in chunk.text
-    chunk.set_flow_image_size(1, height_px=200)
-    assert 'style="border-radius: 8px; height: 200px"' in chunk.text
-    assert [r[2] for r in chunk.flow_image_refs()] == ["images/fig.png", "b.png"]
 
 
 def test_cell_style_get_set():
@@ -349,13 +252,6 @@ def test_convert_image_block_to_place():
     spec = chunk.get_place(idx)
     assert spec.src == "images/f.png" and spec.kind == "image"
     assert chunk.get_cell(0) == "Intro.\n\nAfter."
-
-
-def test_flow_blocks_skip_fences_and_kept_html():
-    text = "## T\n\npara one\n\n```python\ncode\n\nstill code\n```\n\n<div class=\"anno\" style=\"top: 1px; left: 2px\">pinned</div>\n\nlast"
-    chunk = SlideChunk(text)
-    blocks = [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)]
-    assert blocks == ["para one", "```python\ncode\n\nstill code\n```", "last"]
 
 
 def test_row_spans_and_row_columns():
@@ -503,14 +399,6 @@ def test_set_directive_with_duplicate_keys_keeps_content():
     assert chunk.text == "## T\n\nBody.\n\nMore."
 
 
-def test_html_abs_ignores_margin_top_and_border_left():
-    chunk = SlideChunk('## T\n\n<p style="margin-top: 24px">intro</p>\n\n<div style="border-left: 4px solid red">note</div>\n\n<div style="top: 50px; left: 100px">callout</div>')
-    refs = chunk.html_abs_refs()
-    assert [r.inner for r in refs] == ["callout"]
-    assert [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)] == [
-        '<p style="margin-top: 24px">intro</p>', '<div style="border-left: 4px solid red">note</div>']
-
-
 def test_multiline_notes_comment_is_not_a_block():
     chunk = SlideChunk("## T\n\nPara.\n\n<!-- notes: first\n\nsecond paragraph -->\n\nLast.")
     assert [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)] == ["Para.", "Last."]
@@ -534,15 +422,6 @@ def test_place_unknown_keys_survive_round_trip():
     again = chunk.get_place(0)
     assert again.x == 5 and again.extra == {"note": "keep me", "opacity": 0.5}
     assert "note: keep me" in chunk.text and "opacity: 0.5" in chunk.text
-
-
-def test_convert_html_abs_returns_inserted_index():
-    text = '## T\n\n<div style="top: 10px; left: 20px">early</div>\n\n```place\nx: 1\ny: 1\ntext: |\n  P0\n```\n\n```place\nx: 2\ny: 2\ntext: |\n  P1\n```'
-    chunk = SlideChunk(text)
-    idx = chunk.convert_html_abs_to_place(0)
-    assert idx == 0
-    assert chunk.get_place(idx).text.strip() == "early"
-    assert [r.spec.text.strip() for r in chunk.place_refs()] == ["early", "P0", "P1"]
 
 
 def test_place_extract_leaves_code_blocks_and_separators_alone():
@@ -570,3 +449,68 @@ def test_place_numbers_reject_non_finite_and_accept_percent():
 
     spec = parse_spec("x: 55%\ny: .nan\nz: .inf\nw: 40%")
     assert spec.x == 55 and spec.y == 0 and spec.z is None and spec.w == 40
+
+
+def test_reorder_and_duplicate_place():
+    text = "## T\n\n```place\nx: 1\ny: 1\ntext: |\n  A\n```\n\nmiddle\n\n```place\nx: 2\ny: 2\ntext: |\n  B\n```\n\n```place\nx: 3\ny: 3\ntext: |\n  C\n```"
+    chunk = SlideChunk(text)
+    assert chunk.reorder_place(0, 2) == 2
+    assert [r.spec.text.strip() for r in chunk.place_refs()] == ["B", "C", "A"]
+    assert "\n\nmiddle\n\n" in chunk.text
+    assert chunk.reorder_place(2, 0) == 0
+    assert chunk.text == text
+    doc = DeckDocument.from_text(DECK)
+    chunk = doc.slides[1]
+    assert chunk.duplicate_place(0) == 1
+    refs = chunk.place_refs()
+    assert len(refs) == 2 and refs[1].spec.x == 7 and refs[1].spec.y == 82
+    assert chunk.get_cell(0) == "Left text." and chunk.get_cell(1).startswith("Right text.")
+
+
+def test_cell_blocks_match_rendered_structure():
+    chunk = SlideChunk(ANNO_DECK)
+    kinds = [(b.kind, b.tag) for b in chunk.cell_blocks(0)]
+    # two consecutive positioned divs are one markdown html block but two elements
+    assert kinds[:2] == [("html", "div"), ("html", "div")]
+    assert chunk.cell_blocks(0)[0].positioned and chunk.cell_blocks(0)[0].classes == ["anno"]
+    assert [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)][2:] == ["### Closed", "OpenAI<br>\nxAI"]
+    loose = SlideChunk("## T\n\n- a\n\n- b\n\n### Sub\nText under\n\n```python\nx = 1\n\n\ny = 2\n```\n\n<!-- notes: n -->")
+    blocks = [loose.text[a:b] for a, b in loose.cell_flow_blocks(0)]
+    assert blocks == ["- a\n\n- b", "### Sub", "Text under", "```python\nx = 1\n\n\ny = 2\n```"]
+
+
+def test_positioned_div_converts_with_its_own_position():
+    chunk = SlideChunk(ANNO_DECK)
+    idx = chunk.convert_cell_block_to_place(0, 1, 0, 0, 0)
+    spec = chunk.get_place(idx)
+    assert spec.classes == ["anno"]
+    assert spec.x == round(396 / 12.8, 1) and spec.y == round(615 / 7.2, 1) and spec.w == round(330 / 12.8, 1)
+    assert spec.text.strip() == "Restrictive licence."
+    assert [b.tag for b in chunk.cell_blocks(0) if b.kind == "html"] == ["div"]
+    assert len(parse_markdown(chunk.text).slides) == 1
+    # editing the remaining div block keeps everything else byte-identical
+    chunk.set_cell_block(0, 0, '<div class="anno" style="top: 1px; left: 2px">edited</div>')
+    assert chunk.cell_blocks(0)[0].px("top") == 1
+    assert "### Closed\n\nOpenAI<br>\nxAI" in chunk.text
+
+
+def test_block_images_resize_and_lift():
+    chunk = SlideChunk("## T\n\n![A figure](images/fig.png)\n\n|||\n\nText <img src=\"b.png\" alt=\"B\" style=\"height: 380px; width: auto; border-radius: 8px;\"> more")
+    assert [src for _, _, src in chunk.block_images(0, 0)] == ["images/fig.png"]
+    chunk.set_block_image_size(0, 0, 0, width_px=512.4)
+    assert '<img src="images/fig.png" alt="A figure" style="width: 512px">' in chunk.text
+    chunk.set_block_image_size(1, 0, 0, width_px=300)
+    assert 'style="width: 300px; border-radius: 8px"' in chunk.text
+    chunk.set_block_image_size(1, 0, 0, height_px=200)
+    assert 'style="border-radius: 8px; height: 200px"' in chunk.text
+    idx = chunk.convert_block_image_to_place(1, 0, 0, 10, 20, 30)
+    assert chunk.get_place(idx).src == "b.png"
+    assert chunk.get_cell(1) == "Text  more"
+    idx2 = chunk.convert_block_image_to_place(0, 0, 0, 1, 2, 3)
+    assert chunk.get_place(idx2).src == "images/fig.png"
+    assert chunk.get_cell(0) == ""
+
+
+def test_column_separator_inside_code_fence_is_ignored():
+    chunk = SlideChunk("## T\n\n```text\na ||| b\n|||\n```\n\nafter")
+    assert len(chunk.cell_spans()) == 1
