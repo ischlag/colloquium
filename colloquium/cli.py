@@ -101,6 +101,19 @@ def _capture(args):
             print(f"Captured: {path}")
 
 
+def _new(args):
+    """Create a new deck folder from a template."""
+    from colloquium.templates import create_deck
+
+    try:
+        deck = create_deck(Path(args.target), template=args.template)
+    except (ValueError, FileExistsError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    print(f"Created: {deck}")
+    print(f"Next: colloquium edit {deck}   (or colloquium serve {deck})")
+
+
 def _edit(args):
     """Open the visual slide editor."""
     try:
@@ -157,6 +170,12 @@ def main():
     capture_parser.add_argument("-o", "--output", help="Output directory (default: slides/ next to input)")
     capture_parser.add_argument("-s", "--slide", type=int, help="Capture a single slide (1-indexed)")
     capture_parser.set_defaults(func=_capture)
+
+    # new
+    new_parser = subparsers.add_parser("new", help="Create a new deck folder from the starter template")
+    new_parser.add_argument("target", help="Folder to create, e.g. talks/my-talk (deck becomes my-talk.md inside)")
+    new_parser.add_argument("-t", "--template", default="starter", help="Template name (default: starter)")
+    new_parser.set_defaults(func=_new)
 
     # edit
     edit_parser = subparsers.add_parser("edit", help="Visual slide editor (requires: pip install colloquium[editor])")

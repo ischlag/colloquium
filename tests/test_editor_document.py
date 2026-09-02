@@ -514,3 +514,24 @@ def test_block_images_resize_and_lift():
 def test_column_separator_inside_code_fence_is_ignored():
     chunk = SlideChunk("## T\n\n```text\na ||| b\n|||\n```\n\nafter")
     assert len(chunk.cell_spans()) == 1
+
+
+def test_starter_template_creates_buildable_deck(tmp_path):
+    from colloquium.build import build_deck
+    from colloquium.templates import create_deck, template_names
+
+    assert "starter" in template_names()
+    deck = create_deck(tmp_path / "my-talk")
+    assert deck == (tmp_path / "my-talk" / "my-talk.md").resolve()
+    assert (tmp_path / "my-talk" / "assets" / "logo.png").exists()
+    text = deck.read_text(encoding="utf-8")
+    assert 'title: "my-talk"' in text
+    doc = DeckDocument.from_text(text)
+    assert doc.master_indices() == [0]
+    assert len(doc.slides[3].place_refs()) == 4
+    blocks = doc.slides[2].cell_blocks(1)
+    assert [b.kind for b in blocks] == ["md", "md"] and doc.slides[2].block_images(1, 0)[0][2] == "assets/skyline.png"
+    html = build_deck(parse_markdown(text))
+    assert html.count('<section class="slide') == 3 and 'data-master-index="0"' in html
+    with pytest.raises(FileExistsError):
+        create_deck(tmp_path / "my-talk")

@@ -7,9 +7,22 @@ from pathlib import Path
 
 def file_picker_page(ui, on_pick, root: Path) -> None:
     """Page shown when ``colloquium edit`` is started without a deck."""
-    with ui.column().classes("items-center w-full p-8"):
+    from colloquium.templates import create_deck
+
+    with ui.column().classes("items-center w-full p-8 gap-4"):
         ui.label("Open a colloquium deck").classes("text-xl")
-        fs_browser(ui, root, {".md"}, on_pick, height="70vh", root=root)
+        with ui.row().classes("items-center gap-2 w-full max-w-3xl"):
+            target = ui.input(label="New deck folder", value=str(root / "new-deck")).props("dense outlined").classes("flex-1")
+
+            def create():
+                try:
+                    on_pick(create_deck(Path(target.value)))
+                except (ValueError, FileExistsError, OSError) as exc:
+                    ui.notify(str(exc), color="warning")
+
+            ui.button("New deck from template", icon="add", on_click=create).props("dense")
+        ui.label("or pick an existing .md below").classes("text-sm text-gray-500")
+        fs_browser(ui, root, {".md"}, on_pick, height="60vh", root=root)
 
 
 def fs_browser(ui, start: Path, suffixes: set[str], on_pick, height="50vh", root: Path | None = None) -> None:
