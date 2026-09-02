@@ -85,6 +85,42 @@ html, body {
     z-index: 2;
 }
 
+/* Theme-slide elements repeat on every slide: behind the content by default,
+   in front when the element sets `z`. The slide isolates its stacking so the
+   back layer stays above the slide background. */
+.slide {
+    isolation: isolate;
+}
+
+.slide .colloquium-master-layer {
+    z-index: -1;
+}
+
+.slide .colloquium-master-layer--front {
+    z-index: 2;
+}
+
+/* The theme slide itself is only rendered in the editor preview. */
+.slide--master {
+    outline: 6px dashed #f4a300;
+    outline-offset: -6px;
+}
+
+.slide--master::before {
+    content: "Theme slide: elements placed here repeat on every slide. It is not part of the presentation.";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    padding: 8px 16px;
+    background: #f4a300;
+    color: #1a1a1a;
+    font: 600 18px/1.3 system-ui, sans-serif;
+    text-align: center;
+    z-index: 3;
+    pointer-events: none;
+}
+
 .slide .colloquium-place {
     position: absolute;
     box-sizing: border-box;

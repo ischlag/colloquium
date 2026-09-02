@@ -10,6 +10,8 @@ emitted byte for byte, so git diffs only show what actually changed.
 from __future__ import annotations
 
 import re
+
+import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +24,7 @@ _DIRECTIVE_RE = re.compile(r"<!--\s*([a-z][a-z-]*)\s*:\s*(.*?)\s*-->[ \t]*\n?", 
 _TITLE_RE = re.compile(r"^(#{1,2}) (.*)$", re.MULTILINE)
 _COLUMN_SPLIT_RE = re.compile(r"^\|\|\|[ \t]*$", re.MULTILINE)
 _ROW_SPLIT_RE = re.compile(r"^===[ \t]*$", re.MULTILINE)
+_CUSTOM_CSS_BLOCK_RE = re.compile(r"^custom_css:[ \t]*\|[-+]?[ \t]*\n((?:[ \t]+[^\n]*\n|[ \t]*\n)*)", re.MULTILINE)
 _CELL_STYLE_RE = re.compile(r"<!--\s*cell-style\s*:\s*(.*?)\s*-->[ \t]*\n?", re.DOTALL)
 _ROW_COLUMNS_RE = re.compile(r"<!--\s*row-columns\s*:\s*(.*?)\s*-->", re.DOTALL)
 
@@ -48,6 +51,21 @@ class SlideChunk:
     def directives(self) -> list[tuple[str, str]]:
         return [(m.group(1), m.group(2).strip()) for m in _DIRECTIVE_RE.finditer(self.text)]
 
+    @property
+    def is_master(self) -> bool:
+        """True for a theme slide (``<!-- master: true -->``)."""
+        v = (self.get_directive("master") or "").strip().lower()
+        return bool(v) and v not in {"off", "false", "no", "0", "none"}
+
+    def _delete_span(self, a: int, b: int) -> None:
+        """Remove text[a:b] and collapse the blank lines it leaves behind."""
+        head, tail = self.text[:a], self.text[b:]
+        if head.endswith("\n\n") and tail.startswith("\n"):
+            tail = tail.lstrip("\n")
+        elif head.endswith("\n") and tail.startswith("\n\n"):
+            head = head.rstrip("\n") + "\n"
+        self.text = head + tail
+
     def get_directive(self, key: str) -> str | None:
         for k, v in self.directives():
             if k == key:
@@ -59,6 +77,9 @@ class SlideChunk:
         value = (value or "").strip()
         matches = [m for m in _DIRECTIVE_RE.finditer(self.text) if m.group(1) == key]
         if matches:
+            # Drop duplicates first, from the back, while their offsets are valid.
+            for extra in reversed(matches[1:]):
+                self._delete_span(extra.start(), extra.end())
             m = matches[0]
             if value:
                 replacement = f"<!-- {key}: {value} -->"
@@ -66,10 +87,7 @@ class SlideChunk:
                 tail = m.group(0)[len(m.group(0).rstrip("\n \t")):]
                 self.text = self.text[: m.start()] + replacement + tail + self.text[m.end():]
             else:
-                self.text = self.text[: m.start()] + self.text[m.end():]
-            # drop any duplicates of the same key
-            for extra in reversed(matches[1:]):
-                self.text = self.text[: extra.start()] + self.text[extra.end():]
+                self._delete_span(m.start(), m.end())
             self.text = self.text.strip("\n")
             return
         if not value:
@@ -301,6 +319,7 @@ class SlideChunk:
         masked = seg
         for a, b in self._kept_spans(seg):
             masked = masked[:a] + " " * (b - a) + masked[b:]
+        masked = re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), masked, flags=re.DOTALL)
         out = []
         for a, b in self._block_spans_in(masked):
             visible = re.sub(r"<!--.*?-->", "", masked[a:b], flags=re.DOTALL)
@@ -378,6 +397,8 @@ class SlideChunk:
         return self.place_refs()[i].spec
 
     def set_place(self, i: int, spec: place.PlaceSpec) -> None:
+        if spec.error:
+            raise ValueError("This place block has invalid YAML; fix it in the raw markdown first")
         ref = self.place_refs()[i]
         block = spec.to_markdown()
         raw = self.text[ref.start : ref.end]
@@ -430,8 +451,10 @@ class SlideChunk:
             spec.style = format_inline_style(keep)
         before = self.text[: ref.start].rstrip(" \t")
         after = self.text[ref.end :]
-        self.text = re.sub(r"\n{3,}", "\n\n", before.rstrip("\n") + "\n\n" + spec.to_markdown() + "\n" + after.lstrip(" \t")).strip("\n")
-        return len(self.place_refs()) - 1
+        head = before.rstrip("\n") + "\n\n"
+        self.text = re.sub(r"\n{3,}", "\n\n", head + spec.to_markdown() + "\n" + after.lstrip(" \t")).strip("\n")
+        # the new block sits after every place block that preceded the element
+        return len(self._place_refs_in(before))
 
     # ----- stacking order (later in source = drawn on top) ----------------------
     def _swap_spans(self, a: tuple[int, int], b: tuple[int, int]) -> None:
@@ -571,7 +594,7 @@ class SlideChunk:
 # annotation callouts). Non-nested only: the inner content must not contain
 # another tag of the same name.
 _HTML_ABS_RE = re.compile(
-    r"<(?P<tag>div|span|p)\b(?P<attrs>[^>]*\bstyle=\"(?P<style>[^\"]*\b(?:top|left)\s*:[^\"]*)\"[^>]*)>"
+    r"<(?P<tag>div|span|p)\b(?P<attrs>[^>]*\bstyle=\"(?P<style>[^\"]*(?<![\w-])(?:top|left)\s*:[^\"]*)\"[^>]*)>"
     r"(?P<inner>(?:(?!<(?P=tag)\b).)*?)</(?P=tag)>",
     re.DOTALL | re.IGNORECASE,
 )
@@ -753,6 +776,49 @@ class DeckDocument:
         if self.separators:
             del self.separators[min(index, len(self.separators) - 1)]
         self._normalize_separators()
+
+    def master_indices(self) -> list[int]:
+        return [i for i, c in enumerate(self.slides) if c.is_master]
+
+    def add_master_slide(self) -> int:
+        """Insert a theme slide at the top and return its index."""
+        self.insert_slide(0, "<!-- master: true -->")
+        return 0
+
+    # ----- frontmatter ----------------------------------------------------------
+    def frontmatter_data(self) -> dict:
+        m = re.search(r"\A\s*---[ \t]*\n(.*?)\n---[ \t]*\n", self.frontmatter, re.DOTALL)
+        if not m:
+            return {}
+        try:
+            data = yaml.safe_load(m.group(1))
+        except yaml.YAMLError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def get_custom_css(self) -> str:
+        v = self.frontmatter_data().get("custom_css")
+        return v if isinstance(v, str) else ""
+
+    def set_custom_css(self, css: str) -> None:
+        """Rewrite the ``custom_css: |`` block string-level; other keys untouched."""
+        css = css.rstrip("\n")
+        block = ""
+        if css:
+            block = "custom_css: |\n" + "".join(("  " + line if line.strip() else "") + "\n" for line in css.split("\n"))
+        m = _CUSTOM_CSS_BLOCK_RE.search(self.frontmatter)
+        if m:
+            self.frontmatter = self.frontmatter[: m.start()] + block + self.frontmatter[m.end():]
+            return
+        if "custom_css" in self.frontmatter_data():
+            raise ValueError("custom_css is not written as a `custom_css: |` block; edit the frontmatter by hand")
+        if not block:
+            return
+        fm = re.match(r"\A(\s*---[ \t]*\n.*?\n)(---[ \t]*\n)", self.frontmatter, re.DOTALL)
+        if fm:
+            self.frontmatter = self.frontmatter[: fm.end(1)] + block + self.frontmatter[fm.end(1):]
+        else:
+            self.frontmatter = "---\n" + block + "---\n\n" + self.frontmatter
 
     def move_slide(self, src: int, dst: int) -> None:
         chunk = self.slides.pop(src)

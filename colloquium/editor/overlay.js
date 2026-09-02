@@ -56,6 +56,10 @@
     .ce-crop-ghost { position: absolute; opacity: 0.35; pointer-events: none; z-index: 1003; max-width: none; max-height: none; }
     .ce-crop-frame { position: absolute; z-index: 1004; box-sizing: border-box; border: 2px solid #ff8c1e; cursor: move; background: transparent; box-shadow: 0 0 0 9999px rgba(0,0,0,0.25); }
     .ce-crop-frame .ce-handle { border-color: #ff8c1e; }
+    .ce-box--locked { border-style: dashed; border-color: #f4a300; }
+    .ce-box--locked .ce-handle { display: none; }
+    .ce-box--locked .ce-readout { background: #f4a300; color: #1a1a1a; }
+    .colloquium-place--master { cursor: pointer !important; }
     .ce-divider { position: absolute; z-index: 1001; pointer-events: auto; }
     .ce-divider-v { width: 10px; cursor: col-resize; }
     .ce-divider-h { height: 10px; cursor: row-resize; }
@@ -190,6 +194,7 @@
   function elOf(sel) {
     if (!sel) return null;
     if (sel.kind === "place") return placeEl(sel.index);
+    if (sel.kind === "master") return state.slide.querySelector('.colloquium-place--master[data-master-index="' + sel.index + '"]');
     if (sel.kind === "html") return htmlAbsEls()[sel.index] || null;
     return flowTarget(sel);
   }
@@ -202,6 +207,8 @@
   function hitTest(target) {
     if (!state.slide.contains(target)) return null;
     if (target.closest(".ce-editor")) return null;
+    const master = target.closest(".colloquium-place--master");
+    if (master) return { kind: "master", index: parseInt(master.dataset.masterIndex, 10) };
     const place = target.closest(".colloquium-place");
     if (place) return { kind: "place", index: parseInt(place.dataset.placeIndex, 10) };
     if (target.closest(".ce-box")) return state.selection;
@@ -271,10 +278,14 @@
 
   function updateBox(el) {
     const box = ensureBox();
+    box.classList.remove("ce-box--locked");
     const p = elPercentBox(el);
     setBoxGeometry(box, p);
     const ro = box.querySelector(".ce-readout");
-    if (state.selection && state.selection.kind === "html") {
+    if (state.selection && state.selection.kind === "master") {
+      box.classList.add("ce-box--locked");
+      ro.textContent = "theme element: double-click to edit it on the theme slide";
+    } else if (state.selection && state.selection.kind === "html") {
       ro.textContent = `left ${Math.round(p.x * PX_W)}px  top ${Math.round(p.y * PX_H)}px  w ${Math.round(p.w * PX_W)}px`;
     } else if (state.selection && state.selection.kind === "img") {
       ro.textContent = `inline image  w ${Math.round(p.w * PX_W)}px  h ${Math.round(p.h * PX_H)}px  (drag to place freely)`;
@@ -330,7 +341,7 @@
       drawExtraBoxes();
       return;
     }
-    if (isMovable(sel) || sel.kind === "img" || sel.kind === "block") {
+    if (isMovable(sel) || sel.kind === "img" || sel.kind === "block" || sel.kind === "master") {
       const el = elOf(sel);
       if (el) updateBox(el);
       drawExtraBoxes();
@@ -390,7 +401,7 @@
     const el = placeEl(sel.index);
     const g = el && el.getAttribute("data-group");
     if (!g) return null;
-    const members = Array.from(state.slide.querySelectorAll('.colloquium-place[data-group="' + g + '"]'))
+    const members = Array.from(state.slide.querySelectorAll('.colloquium-place[data-group="' + g + '"]:not(.colloquium-place--master)'))
       .map((m) => ({ kind: "place", index: parseInt(m.dataset.placeIndex, 10) }));
     return members.length > 1 ? members : null;
   }
@@ -522,7 +533,8 @@
       if (opts.height) item.height = Math.round(box.h * PX_H);
       return item;
     }
-    const item = { kind: "place", index: sel.index, x: round(box.x), y: round(box.y), w: round(box.w) };
+    const item = { kind: "place", index: sel.index, x: round(box.x), y: round(box.y) };
+    if (opts.width || el.style.width) item.w = round(box.w);
     const autoHeight = !el.style.height || el.getAttribute("data-auto-height") === "1";
     if (opts.height || (!autoHeight && !opts.clearHeight)) item.h = round(box.h);
     return item;
@@ -583,8 +595,10 @@
   }
 
   function onMouseDown(e) {
+    state.downClient = { x: e.clientX, y: e.clientY };
     if (e.button !== 0 || state.editor || state.crop) return;
     if (e.target.closest(".ce-box")) return;
+    if (e.target.closest(".colloquium-place--master")) return; // locked: edited on the theme slide
     let el = e.target.closest(".colloquium-place");
     let sel = null;
     if (el && state.slide.contains(el)) {
@@ -684,7 +698,15 @@
     const cur = toPercent(e.clientX, e.clientY);
     const dx = cur.x - d.start.x;
     const dy = cur.y - d.start.y;
-    if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) d.moved = true;
+    // A drag starts after a deliberate distance in screen pixels; converting a
+    // flow block or inline image into a free object needs a bigger one.
+    if (!d.moved) {
+      const dc = state.downClient || { x: e.clientX, y: e.clientY };
+      const dist = Math.hypot(e.clientX - dc.x, e.clientY - dc.y);
+      const need = (d.mode === "move-block" || d.mode === "move-img") ? 10 : 4;
+      if (dist < need) return;
+      d.moved = true;
+    }
 
     if (d.mode === "move-img") {
       d.el.style.transform = `translate(${dx * PX_W}px, ${dy * PX_H}px)`;
@@ -991,7 +1013,7 @@
 
   // ---------- in-place source editor ----------
   function requestEdit(sel) {
-    if (!sel || sel.kind === "slide" || sel.kind === "img") return;
+    if (!sel || sel.kind === "slide" || sel.kind === "img" || sel.kind === "master") return;
     const el = elOf(sel);
     if (!el) return;
     if (sel.kind === "place" && el.classList.contains("colloquium-place--image")) return;
@@ -1047,6 +1069,7 @@
     if (!hit || hit.kind === "slide") return;
     e.preventDefault();
     e.stopPropagation();
+    if (hit.kind === "master") { emit("ce-goto-master", { index: hit.index }); return; }
     if (!sameSel(hit, state.selection)) select(hit, true);
     requestEdit(hit);
   }
@@ -1088,7 +1111,7 @@
 
   function cropEnter() {
     const sel = state.selection;
-    if (!sel || sel.kind !== "place") return;
+    if (state.crop || !sel || sel.kind !== "place") return;
     const el = placeEl(sel.index);
     const img = el && el.querySelector("img");
     if (!el || !img) return;
@@ -1246,10 +1269,22 @@
     const style = doc.createElement("style");
     style.textContent = STYLE;
     doc.head.appendChild(style);
+    // Python re-sends the selection on ce-ready; a stale one would draw boxes on the wrong slide.
+    state.selection = null;
+    state.extra = [];
     const refreshSlide = () => {
       state.editor = null;
-      state.crop = null;
-      state.slide = doc.querySelector(".slide.active");
+      if (state.crop) cropExit();
+      const next = doc.querySelector(".slide.active");
+      if (state.slide && next !== state.slide) { state.selection = null; state.extra = []; }
+      if (state.box && state.box.parentNode && state.box.parentNode !== next) {
+        state.box.parentNode.removeChild(state.box);
+        state.box = null;
+        if (state.guides) { [state.guides.v, state.guides.h].forEach((g) => g.parentNode && g.parentNode.removeChild(g)); state.guides = null; }
+      }
+      clearExtraBoxes();
+      clearDividers();
+      state.slide = next;
       if (state.slide) markHtmlAbs();
       applySelection();
     };

@@ -388,3 +388,185 @@ def test_place_group_round_trip():
     again = parse_spec(spec.to_yaml())
     assert again.group == "g1"
     assert 'group: g1' in spec.to_yaml()
+
+
+MASTER_DECK = """---
+title: T
+custom_css: |
+  :root {
+    --colloquium-accent: #e4002b;
+  }
+---
+
+<!-- master: true -->
+
+```place
+src: logo.png
+x: 90
+y: 3
+w: 8
+```
+
+```place
+x: 2
+y: 95
+w: 30
+z: 1
+text: |
+  footer note
+```
+
+---
+
+## First
+
+Body.
+
+---
+
+<!-- master: off -->
+
+## Bare
+
+No logo here.
+"""
+
+
+def test_master_slide_excluded_and_layer_stamped():
+    from colloquium.build import build_deck
+
+    deck = parse_markdown(MASTER_DECK)
+    assert deck.slides[0].metadata["master"] == "on"
+    assert deck.slides[2].metadata["master"] == "off"
+    html = build_deck(deck)
+    assert html.count('<section class="slide') == 2
+    assert "<section class=\"slide slide--master" not in html and " slide--master" not in html.split("</style>")[-1]
+    first = html.split("<section")[1]
+    assert 'data-master-index="0"' in first and 'data-master-index="1"' in first
+    assert 'colloquium-master-layer--front' in first  # z: 1 goes in front
+    assert first.count('class="colloquium-place-layer colloquium-master-layer') == 2
+    assert "data-place-index" not in first
+    bare = html.split("<section")[2]
+    assert "colloquium-master-layer" not in bare
+
+
+def test_master_slide_included_in_editor_build():
+    from colloquium.build import build_deck
+
+    html = build_deck(parse_markdown(MASTER_DECK), include_master=True)
+    assert html.count('<section class="slide') == 3
+    master = html.split("<section")[1]
+    assert "slide--master" in master
+    assert 'data-place-index="0"' in master and "colloquium-master-layer" not in master
+
+
+def test_document_master_helpers_and_custom_css():
+    from colloquium.editor import theme
+
+    doc = DeckDocument.from_text(MASTER_DECK)
+    assert doc.master_indices() == [0]
+    assert doc.slides[0].is_master and not doc.slides[2].is_master
+    assert doc.to_text() == MASTER_DECK
+    css = doc.get_custom_css()
+    assert theme.get_root_var(css, "--colloquium-accent") == "#e4002b"
+    css = theme.set_root_var(css, "--colloquium-accent", "#00aa00")
+    css = theme.set_root_var(css, "--colloquium-bg", "#fafafa")
+    css = theme.set_background_image(css, "assets/bg.png")
+    doc.set_custom_css(css)
+    again = DeckDocument.from_text(doc.to_text())
+    c2 = again.get_custom_css()
+    assert theme.get_root_var(c2, "--colloquium-accent") == "#00aa00"
+    assert theme.get_root_var(c2, "--colloquium-bg") == "#fafafa"
+    assert theme.get_background_image(c2) == "assets/bg.png"
+    assert "title: T" in again.frontmatter
+    c3 = theme.set_background_image(theme.set_root_var(c2, "--colloquium-bg", None), None)
+    assert theme.get_root_var(c3, "--colloquium-bg") is None and theme.get_background_image(c3) is None
+    # body untouched
+    assert again.slides[1].text == "## First\n\nBody."
+    plain = DeckDocument.from_text("## S\n\nbody\n")
+    assert plain.master_indices() == []
+    assert plain.add_master_slide() == 0
+    assert plain.slides[0].is_master and len(plain.slides) == 2
+    plain.set_custom_css(":root {\n  --colloquium-bg: #000;\n}")
+    assert plain.to_text().startswith("---\ncustom_css: |\n  :root {\n")
+    assert len(parse_markdown(plain.to_text()).slides) == 2
+
+
+# ----- hardening pass -------------------------------------------------------
+
+def test_set_directive_with_duplicate_keys_keeps_content():
+    chunk = SlideChunk("<!-- class: a -->\n\n## T\n\nBody text here.\n\n<!-- class: b -->\n\nMore.")
+    chunk.set_directive("class", "abc")
+    assert chunk.text == "<!-- class: abc -->\n\n## T\n\nBody text here.\n\nMore."
+    chunk = SlideChunk("<!-- class: a -->\n\n## T\n\nBody.\n\n<!-- class: b -->\n\nMore.")
+    chunk.set_directive("class", None)
+    assert chunk.text == "## T\n\nBody.\n\nMore."
+
+
+def test_html_abs_ignores_margin_top_and_border_left():
+    chunk = SlideChunk('## T\n\n<p style="margin-top: 24px">intro</p>\n\n<div style="border-left: 4px solid red">note</div>\n\n<div style="top: 50px; left: 100px">callout</div>')
+    refs = chunk.html_abs_refs()
+    assert [r.inner for r in refs] == ["callout"]
+    assert [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)] == [
+        '<p style="margin-top: 24px">intro</p>', '<div style="border-left: 4px solid red">note</div>']
+
+
+def test_multiline_notes_comment_is_not_a_block():
+    chunk = SlideChunk("## T\n\nPara.\n\n<!-- notes: first\n\nsecond paragraph -->\n\nLast.")
+    assert [chunk.text[a:b] for a, b in chunk.cell_flow_blocks(0)] == ["Para.", "Last."]
+
+
+def test_set_place_refuses_invalid_yaml():
+    chunk = SlideChunk("## T\n\n```place\nx: 1\ntext: it's: bad: yaml\n```")
+    spec = chunk.get_place(0)
+    assert spec.error
+    with pytest.raises(ValueError):
+        chunk.set_place(0, spec)
+    assert "it's: bad: yaml" in chunk.text
+
+
+def test_place_unknown_keys_survive_round_trip():
+    chunk = SlideChunk("## T\n\n```place\nx: 1\ny: 2\nw: 10\nnote: keep me\nopacity: 0.5\ntext: |\n  hi\n```")
+    spec = chunk.get_place(0)
+    assert spec.extra == {"note": "keep me", "opacity": 0.5}
+    spec.x = 5
+    chunk.set_place(0, spec)
+    again = chunk.get_place(0)
+    assert again.x == 5 and again.extra == {"note": "keep me", "opacity": 0.5}
+    assert "note: keep me" in chunk.text and "opacity: 0.5" in chunk.text
+
+
+def test_convert_html_abs_returns_inserted_index():
+    text = '## T\n\n<div style="top: 10px; left: 20px">early</div>\n\n```place\nx: 1\ny: 1\ntext: |\n  P0\n```\n\n```place\nx: 2\ny: 2\ntext: |\n  P1\n```'
+    chunk = SlideChunk(text)
+    idx = chunk.convert_html_abs_to_place(0)
+    assert idx == 0
+    assert chunk.get_place(idx).text.strip() == "early"
+    assert [r.spec.text.strip() for r in chunk.place_refs()] == ["early", "P0", "P1"]
+
+
+def test_place_extract_leaves_code_blocks_and_separators_alone():
+    from colloquium.elements.place import extract
+
+    src = "Left\n```place\nx: 1\ny: 1\n```\n|||\n\nRight\n\n```python\ndef a():\n    pass\n\n\ndef b():\n    pass\n```"
+    remaining, specs = extract(src)
+    assert len(specs) == 1
+    assert remaining.startswith("Left\n\n|||")
+    assert "    pass\n\n\ndef b()" in remaining
+    untouched = "a\n\n\n\nb"
+    assert extract(untouched)[0] == untouched
+
+
+def test_place_block_comment_does_not_become_title():
+    deck = parse_markdown("```place\nx: 5\n# main figure\nsrc: fig.png\n```\n\nBody\n\n## Real title")
+    slide = deck.slides[0]
+    assert slide.title == "Real title"
+    assert "# main figure" in slide.content
+    assert slide.layout == "content"
+
+
+def test_place_numbers_reject_non_finite_and_accept_percent():
+    from colloquium.elements.place import parse_spec
+
+    spec = parse_spec("x: 55%\ny: .nan\nz: .inf\nw: 40%")
+    assert spec.x == 55 and spec.y == 0 and spec.z is None and spec.w == 40

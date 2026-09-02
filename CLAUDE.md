@@ -40,6 +40,7 @@ Per-slide configuration via HTML comments:
 - `<!-- style: background: #1a1a2e -->` — inline styles
 - `<!-- notes: Speaker notes here -->` — speaker notes (hidden in presentation)
 - `<!-- cell-style: text-align: center -->` — placed inside a column/row cell, styles that cell's wrapper (used by the editor's cell toolbar)
+- `<!-- master: true -->` — theme slide: not rendered, its ```place elements repeat on every other slide (behind content; `z:` puts one in front); `<!-- master: off -->` opts a slide out. Deck-wide colours/fonts live in frontmatter `custom_css` (`:root { --colloquium-*: ... }`)
 
 ### Output
 - All output is a single self-contained HTML file (CSS/JS inlined)
@@ -82,7 +83,8 @@ colloquium/
 │   ├── document.py   # lossless string-level deck editing (never round-trips through Slide)
 │   ├── app.py        # three-pane UI: slide list | iframe preview | inspector
 │   ├── overlay.js    # selection/drag/resize inside the preview iframe (same origin)
-│   └── images.py     # image import into the deck folder, dimensions
+│   ├── images.py     # image import into the deck folder, dimensions
+│   └── theme.py      # custom_css helpers: --colloquium-* variables, slide background rule
 └── themes/default/
     ├── theme.css     # Default theme
     └── presentation.js  # Navigation engine

@@ -40,6 +40,7 @@ crop rectangle only offsets/scales the image inside an overflow-hidden box.
 from __future__ import annotations
 
 import html as html_module
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -82,6 +83,7 @@ class PlaceSpec:
     stroke: str = ""
     stroke_width: float | None = None
     flip: bool = False       # line/arrow: bottom-left to top-right instead of top-left to bottom-right
+    extra: dict = field(default_factory=dict)   # unknown keys, preserved verbatim
     raw: str = ""
     error: str = ""
 
@@ -128,6 +130,9 @@ class PlaceSpec:
             lines.append(f"class: {' '.join(self.classes)}")
         if self.style:
             lines.append(f"style: {_quote(self.style)}")
+        for k, v in self.extra.items():
+            dumped = yaml.safe_dump({k: v}, default_flow_style=True, allow_unicode=True, width=10**6).strip()
+            lines.append(dumped[1:-1].strip() if dumped.startswith("{") else dumped)
         if self.text:
             lines.append("text: |")
             lines.extend(f"  {line}" if line else "" for line in self.text.rstrip("\n").splitlines())
@@ -147,18 +152,30 @@ def _fmt(value: float, digits: int = 1) -> str:
     return text if text not in {"", "-0"} else "0"
 
 
-def _num(value, default=None) -> float | None:
+def _num(value, default: float | None = None) -> float | None:
+    """Coerce a YAML scalar to a finite float; ``"55%"`` is accepted."""
     if value is None or value == "":
         return default
+    if isinstance(value, bool):
+        return default
     try:
-        return float(value)
+        v = float(str(value).strip().rstrip("%")) if not isinstance(value, (int, float)) else float(value)
     except (TypeError, ValueError):
         return default
+    return v if math.isfinite(v) else default
+
+
 
 
 def reset() -> None:
     """Reset element-local state between builds."""
     return None
+
+
+_KNOWN_KEYS = {
+    "x", "y", "w", "h", "src", "text", "crop", "size", "align", "group", "z", "rotate",
+    "class", "style", "shape", "fill", "stroke", "stroke_width", "flip",
+}
 
 
 def parse_spec(yaml_str: str) -> PlaceSpec:
@@ -184,7 +201,7 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
     spec.align = align if align in _ALIGNS else ""
     spec.group = str(data.get("group", "") or "").strip()
     z = data.get("z")
-    spec.z = int(z) if isinstance(z, (int, float)) else None
+    spec.z = int(z) if isinstance(z, (int, float)) and math.isfinite(z) else None
     spec.rotate = _num(data.get("rotate"))
     classes = data.get("class", "")
     spec.classes = str(classes).split() if classes else []
@@ -195,6 +212,7 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
     spec.stroke = str(data.get("stroke", "") or "").strip()
     spec.stroke_width = _num(data.get("stroke_width"))
     spec.flip = bool(data.get("flip", False))
+    spec.extra = {str(k): v for k, v in data.items() if str(k) not in _KNOWN_KEYS}
 
     crop = data.get("crop")
     if isinstance(crop, (list, tuple)) and len(crop) == 4:
@@ -222,13 +240,21 @@ def parse_spec(yaml_str: str) -> PlaceSpec:
 def extract(content: str) -> tuple[str, list[PlaceSpec]]:
     """Remove all ```place blocks from slide markdown and return their specs."""
     specs: list[PlaceSpec] = []
-
-    def _take(match: re.Match) -> str:
+    parts: list[str] = []
+    pos = 0
+    for match in PLACE_FENCE_RE.finditer(content):
         specs.append(parse_spec(match.group(1)))
-        return ""
-
-    remaining = PLACE_FENCE_RE.sub(_take, content)
-    remaining = re.sub(r"\n{3,}", "\n\n", remaining)
+        parts.append(content[pos:match.start()])
+        pos = match.end()
+    if not specs:
+        return content.strip(), specs
+    parts.append(content[pos:])
+    # Neighbours of a removed block are re-joined by a paragraph break so a
+    # fence that interrupted a paragraph never glues lines together; the rest
+    # of the slide (code blocks included) is left byte-for-byte alone.
+    remaining = parts[0]
+    for part in parts[1:]:
+        remaining = remaining.rstrip("\n") + "\n\n" + part.lstrip("\n")
     return remaining.strip(), specs
 
 
@@ -340,3 +366,26 @@ def render_layer(specs: list[PlaceSpec], md=None) -> str:
         return ""
     items = "\n".join(render_spec(spec, i, md) for i, spec in enumerate(specs))
     return f'<div class="colloquium-place-layer">\n{items}\n</div>'
+
+
+def render_master_layer(specs: list[PlaceSpec], md=None) -> str:
+    """Render theme-slide specs as layers that repeat on every slide.
+
+    Elements without ``z`` sit behind the slide content; elements with a
+    ``z`` value go into a front layer above it.
+    """
+    back: list[str] = []
+    front: list[str] = []
+    for i, spec in enumerate(specs):
+        if spec.error:
+            continue
+        html = render_spec(spec, i, md)
+        html = html.replace(f'data-place-index="{i}"', f'data-master-index="{i}"', 1)
+        html = html.replace('class="colloquium-place ', 'class="colloquium-place colloquium-place--master ', 1)
+        (front if spec.z is not None else back).append(html)
+    out = ""
+    if back:
+        out += '<div class="colloquium-place-layer colloquium-master-layer">' + "".join(back) + "</div>"
+    if front:
+        out += '<div class="colloquium-place-layer colloquium-master-layer colloquium-master-layer--front">' + "".join(front) + "</div>"
+    return out

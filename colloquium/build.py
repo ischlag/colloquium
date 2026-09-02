@@ -1235,7 +1235,7 @@ def _build_slide_html(
     footer: dict | None, bib_entries: dict | None = None,
     citation_style: str = "author-year", cited_keys: list | None = None,
     citation_order: str = "auto", citation_numbers: dict[str, int] | None = None,
-    deck_figure_captions: bool = False,
+    deck_figure_captions: bool = False, master_layer: str = "",
 ) -> str:
     """Build the HTML for a single slide."""
     if bib_entries is None:
@@ -1318,6 +1318,8 @@ def _build_slide_html(
             content_style_attr = f' style="{content_style}"' if content_style else ""
             parts.append(f'<div class="{" ".join(content_classes)}"{content_style_attr}>{rendered}</div>')
 
+    if master_layer and slide.metadata.get("master") != "on" and slide.metadata.get("master") != "off":
+        parts.append(master_layer)
     place_layer = place.render_layer(place_specs, md)
     if place_layer:
         parts.append(place_layer)
@@ -1678,7 +1680,7 @@ def _build_font_css(fonts: dict | None) -> str:
     return ":root {\n" + "\n".join(overrides) + "\n}"
 
 
-def build_deck(deck: Deck) -> str:
+def build_deck(deck: Deck, include_master: bool = False) -> str:
     """Build a Deck into a self-contained HTML string."""
     elements.reset()
     md = _create_md_renderer()
@@ -1698,12 +1700,29 @@ def build_deck(deck: Deck) -> str:
     citation_order = deck.citation_order
     citation_numbers: dict[str, int] = {}
 
+    # Theme slides (`master: true`) never appear in the output; their placed
+    # elements are stamped onto every other slide. The editor asks for them
+    # to be rendered too (include_master) so they can be edited in place.
+    master_slides = [slide for slide in deck.slides if slide.metadata.get("master") == "on"]
+    master_specs: list = []
+    for slide in master_slides:
+        _, specs = place.extract(slide.content or "")
+        master_specs.extend(specs)
+    master_layer = place.render_master_layer(master_specs, md) if master_specs else ""
+    if not include_master:
+        deck_slides = [slide for slide in deck.slides if slide.metadata.get("master") != "on"]
+    else:
+        deck_slides = list(deck.slides)
+        for slide in master_slides:
+            if "slide--master" not in slide.classes:
+                slide.classes.append("slide--master")
+
     main_slides = [
-        slide for slide in deck.slides
+        slide for slide in deck_slides
         if slide.metadata.get("after") != "references"
     ]
     post_reference_slides = [
-        slide for slide in deck.slides
+        slide for slide in deck_slides
         if slide.metadata.get("after") == "references"
     ]
     render_order_slides = main_slides + post_reference_slides
@@ -1755,6 +1774,7 @@ def build_deck(deck: Deck) -> str:
             citation_order=citation_order,
             citation_numbers=citation_numbers,
             deck_figure_captions=deck.figure_captions,
+            master_layer=master_layer,
         )
         if bib_entries:
             slide_html = _process_citations(
@@ -1784,6 +1804,7 @@ def build_deck(deck: Deck) -> str:
             citation_order=citation_order,
             citation_numbers=citation_numbers,
             deck_figure_captions=deck.figure_captions,
+            master_layer=master_layer,
         )
         if bib_entries:
             slide_html = _process_citations(

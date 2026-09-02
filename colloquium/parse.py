@@ -12,7 +12,7 @@ from colloquium.slide import Slide
 
 # Directive patterns: <!-- key: value -->
 _DIRECTIVE_RE = re.compile(
-    r"<!--\s*(layout|class|style|notes|title|align|valign|columns|rows|padding|size|cite|cite-left|cite-right|footnote|footnote-right|footnotes|img-align|img-valign|img-fill|img-overflow|animate|after)\s*:\s*(.*?)\s*-->",
+    r"<!--\s*(layout|class|style|notes|title|align|valign|columns|rows|padding|size|cite|cite-left|cite-right|footnote|footnote-right|footnotes|img-align|img-valign|img-fill|img-overflow|animate|after|master)\s*:\s*(.*?)\s*-->",
     re.DOTALL,
 )
 
@@ -111,6 +111,10 @@ def parse_slide(text: str) -> Slide:
             metadata["animate"] = value
         elif key == "after":
             metadata["after"] = value
+        elif key == "master":
+            # `master: true` marks a theme slide whose placed elements repeat
+            # on every slide; `master: off` opts a slide out of them.
+            metadata["master"] = "off" if value.lower() in {"off", "false", "no", "0", "none"} else "on"
         elif key == "columns":
             spec = _normalize_grid_spec(value)
             if spec:
@@ -127,8 +131,16 @@ def parse_slide(text: str) -> Slide:
     lines = remaining.strip().splitlines()
     content_parts = []
 
+    in_fence = False
     for line in lines:
         stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            content_parts.append(line)
+            continue
+        if in_fence:
+            content_parts.append(line)
+            continue
         if not title and stripped.startswith("# "):
             title = stripped[2:].strip()
             if layout == "content":

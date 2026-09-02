@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from colloquium.editor import images
+from colloquium.editor import theme as theme_mod
 from colloquium.editor.document import DeckDocument, parse_inline_style, format_grid_fractions
 from colloquium.elements import place
 
@@ -62,6 +63,9 @@ html, body { background: #f7f8fa !important; margin: 0; padding: 8px 10px; overf
 .slide.ce-drop-after { box-shadow: 0 60px 0 -20px #1e78ff, 0 0 0 8px #d7dbe2; }
 .slide::before { content: counter(ce-slide); position: absolute; right: 0; bottom: -64px; font: 700 52px/1 system-ui, sans-serif; color: #7b8496; z-index: 5; }
 .slide--references::before { content: "refs"; }
+.slide--master { counter-increment: none; outline: none !important; box-shadow: 0 0 0 8px #f4a300; }
+.slide--master.ce-current { box-shadow: 0 0 0 28px #1e78ff; }
+.slide--master::before { content: "theme"; position: absolute; left: auto; top: auto; right: 0; bottom: -64px; padding: 0; background: none; font: 700 52px/1 system-ui, sans-serif; color: #f4a300; text-align: right; }
 .colloquium-present, .colloquium-progress, .colloquium-picker-trigger, .colloquium-toast, .colloquium-overflow-warn, .colloquium-picker-overlay { display: none !important; }
 .slide * { pointer-events: none; }
 .slide.ce-dragging { opacity: 0.4; }
@@ -119,6 +123,8 @@ class EditorState:
     def __init__(self, path: Path):
         self.path = path
         self.doc = DeckDocument.load(path)
+        if not self.doc.slides:
+            self.doc.insert_slide(0)
         self.index = 0
         self.selection: dict | None = None
         self.extra: list[dict] = []
@@ -141,7 +147,7 @@ class EditorState:
         if deck.bibliography and not Path(deck.bibliography).is_absolute():
             deck.bibliography = str(self.path.parent / deck.bibliography)
         try:
-            self.html = build_deck(deck)
+            self.html = build_deck(deck, include_master=True)
         except Exception as exc:  # keep the editor alive on a bad build
             self.html = f"<html><body><pre>Build failed:\n{exc}</pre></body></html>"
         self.version += 1
@@ -151,17 +157,21 @@ class EditorState:
         after = [
             (s.get_directive("after") or "") == "references" for s in self.doc.slides
         ]
-        main = [i for i, a in enumerate(after) if not a]
-        post = [i for i, a in enumerate(after) if a]
-        has_refs = "slide--references" in self.html
+        blank = [not s.text.strip() for s in self.doc.slides]
+        main = [i for i, a in enumerate(after) if not a and not blank[i]]
+        post = [i for i, a in enumerate(after) if a and not blank[i]]
+        if blank[src_index]:
+            # an empty chunk renders nothing; show the slide that follows it
+            return min(sum(1 for j in main if j < src_index), max(len(main) - 1, 0))
+        n_refs = len(re.findall(r'<section class="[^"]*\bslide--references\b', self.html))
         if src_index in main:
             return main.index(src_index)
-        return len(main) + (1 if has_refs else 0) + post.index(src_index)
+        return len(main) + n_refs + post.index(src_index)
 
     def source_index(self, rendered: int) -> int | None:
         """Inverse of rendered_index; None for the auto-generated references slide."""
         for i in range(len(self.doc.slides)):
-            if self.rendered_index(i) == rendered:
+            if self.doc.slides[i].text.strip() and self.rendered_index(i) == rendered:
                 return i
         return None
 
@@ -222,7 +232,7 @@ class EditorState:
         return self.doc.slides[self.index]
 
 
-def run_editor(path: str | None, port: int = 8791, open_browser: bool = True) -> None:
+def run_editor(path: str | None, port: int = 8791, open_browser: bool = True, host: str = "127.0.0.1") -> None:
     from fastapi.responses import HTMLResponse
     from nicegui import app, ui
 
@@ -268,6 +278,7 @@ def run_editor(path: str | None, port: int = 8791, open_browser: bool = True) ->
         ui.navigate.reload()
 
     ui.run(
+        host=host,
         port=port,
         title="colloquium edit",
         reload=False,
@@ -365,7 +376,13 @@ def _editor_page(ui, app, st: EditorState):
     def mutate(fn, reload_frame: bool = True):
         """Snapshot, apply fn() to the document, save, rebuild, refresh."""
         st.snapshot()
-        fn()
+        try:
+            fn()
+        except (ValueError, IndexError) as exc:
+            st.undo.pop()
+            notify(f"Edit refused: {exc}", "warning")
+            refresh_all(reload_frame)
+            return
         st.commit()
         refresh_all(reload_frame)
 
@@ -392,6 +409,7 @@ def _editor_page(ui, app, st: EditorState):
                 with ui.menu():
                     for shp, icon in [("rect", "crop_square"), ("rounded", "rounded_corner"), ("ellipse", "circle"), ("line", "horizontal_rule"), ("arrow", "arrow_forward")]:
                         ui.menu_item(shp, on_click=lambda e, shp=shp: add_shape(shp))
+            ui.button("Theme slide", icon="palette", on_click=lambda: theme_slide()).props("flat dense").tooltip("Elements placed on the theme slide repeat on every slide; also colours, fonts and background")
             ui.button("New slide", icon="add", on_click=lambda: new_slide()).props("flat dense")
             ui.button("Duplicate", icon="content_copy", on_click=lambda: dup_slide()).props("flat dense")
             ui.button("Delete slide", icon="delete", on_click=lambda: del_slide()).props("flat dense color=negative")
@@ -420,9 +438,13 @@ def _editor_page(ui, app, st: EditorState):
             with ui.element("div").classes("ce-inspector p-3") as inspector_pane:
                 @ui.refreshable
                 def inspector():
-                    pos_label.text = f"{st.index + 1} / {len(st.doc.slides)}"
+                    pos_label.text = f"{'theme' if st.slide.is_master else st.index + 1} / {len(st.doc.slides)}"
                     sel = st.selection
-                    if sel and sel.get("kind") == "place":
+                    if sel and sel.get("kind") == "master":
+                        _master_ref_inspector(sel["index"])
+                    elif st.slide.is_master and (not sel or sel.get("kind") in {"title", "cell", "content", "block"}):
+                        _theme_inspector()
+                    elif sel and sel.get("kind") == "place":
                         _place_inspector(sel["index"])
                     elif sel and sel.get("kind") == "html":
                         _html_inspector(sel["index"])
@@ -439,6 +461,143 @@ def _editor_page(ui, app, st: EditorState):
                         _slide_inspector()
 
     # --------------------------------------------------------- inspectors
+    def _theme_inspector():
+        chunk = st.slide
+        ui.label("Theme slide").classes("ce-section")
+        ui.label(
+            "Not part of the presentation. Anything placed here (Add image / text / shape) repeats on every slide "
+            "behind its content; set a z-index on an element to put it in front. A slide opts out with <!-- master: off -->."
+        ).classes("text-xs text-gray-400")
+        css = st.doc.get_custom_css()
+        defaults = theme_mod.theme_defaults()
+
+        ui.label("Colours").classes("ce-section")
+        for name, label in theme_mod.COLOR_VARS:
+            cur = theme_mod.get_root_var(css, name)
+            with ui.row().classes("items-center gap-2 no-wrap w-full"):
+                ui.input(value=_hex(cur) or _hex(defaults.get(name)) or "#000000", on_change=lambda e, n=name: set_theme_var(n, e.value)).props("type=color dense borderless").style("width: 44px")
+                ui.label(label).classes("text-sm flex-1")
+                if cur:
+                    ui.label(cur).classes("text-xs font-mono text-gray-500")
+                    ui.button(icon="format_color_reset", on_click=lambda e, n=name: set_theme_var(n, None)).props("flat dense size=sm").tooltip("Back to the theme default")
+                else:
+                    ui.label("default").classes("text-xs text-gray-400")
+
+        ui.label("Fonts").classes("ce-section")
+        for name, label in theme_mod.FONT_VARS:
+            cur = theme_mod.get_root_var(css, name) or ""
+            ui.input(label=label, value=cur, placeholder=defaults.get(name, "")).props("dense outlined").classes("w-full").on(
+                "blur", lambda e, n=name: set_theme_var(n, e.sender.value.strip() or None)
+            ).on("keydown.enter", lambda e, n=name: set_theme_var(n, e.sender.value.strip() or None))
+        ui.label("CSS font stacks; a @font-face in the custom CSS below makes local fonts available.").classes("text-xs text-gray-400")
+
+        ui.label("Slide background").classes("ce-section")
+        bg = theme_mod.get_background_image(css)
+        with ui.row().classes("items-center gap-2 no-wrap w-full"):
+            ui.label(bg or "none").classes("text-xs font-mono flex-1 break-all")
+            ui.button("Choose image", icon="image", on_click=lambda: background_dialog()).props("flat dense size=sm")
+            if bg:
+                ui.button(icon="delete", on_click=lambda: set_background(None)).props("flat dense size=sm").tooltip("Remove background image")
+        pad = _px_or_none(theme_mod.get_root_var(css, "--colloquium-slide-padding")) or _px_or_none(defaults.get("--colloquium-slide-padding"))
+        ui.number(label="Slide padding px", value=pad, step=4, format="%.0f", on_change=lambda e: set_theme_var("--colloquium-slide-padding", None if e.value in (None, "") else f"{int(e.value)}px")).props("dense outlined").classes("w-full")
+
+        ui.label("Custom CSS (frontmatter custom_css)").classes("ce-section")
+        ui.textarea(value=css).props("dense outlined autogrow input-class=font-mono input-style=font-size:11px").classes("w-full").on(
+            "blur", lambda e: set_custom_css_raw(e.sender.value)
+        ).on("keydown.ctrl.enter", lambda e: set_custom_css_raw(e.sender.value))
+        ui.label("blur or Ctrl+Enter applies").classes("text-xs text-gray-400")
+
+        refs = chunk.place_refs()
+        if refs:
+            ui.label("Theme elements").classes("ce-section")
+            for r in refs:
+                sp = r.spec
+                name = sp.src if sp.kind == "image" else (sp.text.strip().splitlines() or ["text"])[0][:40]
+                ui.item(f"{r.index + 1}. {sp.kind}: {name}", on_click=lambda r=r: select_place(r.index)).props("clickable dense")
+        ui.label("Raw theme slide markdown").classes("ce-section")
+        ui.textarea(value=chunk.text).props("dense outlined autogrow input-class=font-mono input-style=font-size:11px").classes("w-full").on(
+            "blur", lambda e: set_raw(e.sender.value)
+        ).on("keydown.ctrl.enter", lambda e: set_raw(e.sender.value))
+        ui.button("Remove theme slide", icon="delete", on_click=lambda: del_slide()).props("flat dense color=negative").classes("mt-2")
+
+    def _master_ref_inspector(i: int):
+        ui.label("Theme element").classes("ce-section")
+        ui.label("This element comes from the theme slide and repeats on every slide. Edit or move it there.").classes("text-xs text-gray-400")
+        ui.button("Edit on theme slide", icon="palette", on_click=lambda: goto_master(i)).props("flat dense")
+        ui.label("This slide can opt out of theme elements with <!-- master: off -->.").classes("text-xs text-gray-400")
+        ui.button("Opt this slide out", on_click=lambda: set_directive("master", "off")).props("flat dense size=sm")
+
+    def set_theme_var(name, value):
+        css = st.doc.get_custom_css()
+        new = theme_mod.set_root_var(css, name, value)
+        if new == css:
+            return
+        try:
+            mutate(lambda: st.doc.set_custom_css(new))
+        except ValueError as exc:
+            notify(str(exc), "warning")
+
+    def set_custom_css_raw(value):
+        if value.rstrip("\n") == st.doc.get_custom_css().rstrip("\n"):
+            return
+        try:
+            mutate(lambda: st.doc.set_custom_css(value))
+        except ValueError as exc:
+            notify(str(exc), "warning")
+
+    def set_background(path):
+        css = st.doc.get_custom_css()
+        new = theme_mod.set_background_image(css, path)
+        if new == css:
+            return
+        try:
+            mutate(lambda: st.doc.set_custom_css(new))
+        except ValueError as exc:
+            notify(str(exc), "warning")
+
+    def background_dialog():
+        with ui.dialog() as dlg, ui.card().classes("w-[760px] max-w-full"):
+            ui.label("Pick a background image (copied into the deck folder if outside it)").classes("text-sm")
+
+            def pick(p: Path):
+                dlg.close()
+                set_background(images.import_image(p, deck_dir))
+
+            _fs_browser(ui, deck_dir, images.IMAGE_SUFFIXES, pick, height="55vh")
+            ui.button("Cancel", on_click=dlg.close).props("flat")
+        dlg.open()
+
+    def theme_slide():
+        masters = st.doc.master_indices()
+        if masters:
+            goto(masters[0])
+            return
+
+        def apply():
+            st.doc.add_master_slide()
+            st.index = 0
+            st.selection = None
+            st.extra = []
+
+        mutate(apply)
+        notify("Theme slide added at the top; it is not part of the presentation")
+
+    def goto_master(i: int):
+        for mi in st.doc.master_indices():
+            n = len(st.doc.slides[mi].place_refs())
+            if i < n:
+                goto(mi)
+                st.selection = {"kind": "place", "index": i}
+                st.extra = []
+                inspector.refresh()
+                toolbar.refresh()
+                js_select()
+                return
+            i -= n
+
+    def on_goto_master(e):
+        goto_master(int((e.args or {}).get("index", 0)))
+
     def _title_inspector():
         ui.label("Title").classes("ce-section")
         chunk = st.slide
@@ -725,12 +884,29 @@ def _editor_page(ui, app, st: EditorState):
             ui.button("Delete", icon="delete", on_click=lambda: delete_block(c, b)).props("flat dense color=negative")
             ui.button("Back to slide", icon="arrow_back", on_click=lambda: select_none()).props("flat dense")
 
-    def set_block(c, b, value):
+    def _block_ok(c, b, count=None) -> bool:
+        """The browser counts rendered blocks; refuse when the source disagrees."""
+        chunk = st.slide
+        if c >= len(chunk.cell_spans()):
+            return False
+        blocks = chunk.cell_flow_blocks(c)
+        if count is None and st.selection and st.selection.get("kind") == "block" and st.selection.get("index") == c * 100 + b:
+            count = st.selection.get("count")
+        if b >= len(blocks) or (count is not None and int(count) != len(blocks)):
+            notify("Cannot map this block to the markdown source; edit the cell instead", "warning")
+            return False
+        return True
+
+    def set_block(c, b, value, count=None):
+        if not _block_ok(c, b, count):
+            return
         if value.strip("\n") == st.slide.get_cell_block(c, b).strip("\n"):
             return
         mutate(lambda: st.slide.set_cell_block(c, b, value))
 
-    def delete_block(c, b):
+    def delete_block(c, b, count=None):
+        if not _block_ok(c, b, count):
+            return
         st.selection = None
         mutate(lambda: st.slide.remove_cell_block(c, b))
 
@@ -914,6 +1090,11 @@ def _editor_page(ui, app, st: EditorState):
                 ui.label("Inline image").classes("ce-tb-label")
                 ui.label("drag handles to resize in place · drag the image to place it freely").classes("text-xs")
                 ui.button("Place freely", icon="open_with", on_click=lambda: _convert_selected_img()).props("flat dense size=sm")
+                return
+            if sel and sel.get("kind") == "master":
+                ui.label("Theme element").classes("ce-tb-label")
+                ui.label("repeats on every slide · double-click to edit it on the theme slide").classes("text-xs")
+                ui.button("Edit on theme slide", icon="palette", on_click=lambda: goto_master(int(sel["index"]))).props("flat dense size=sm")
                 return
             if sel and sel.get("kind") == "block":
                 ui.label("Inline block").classes("ce-tb-label")
@@ -1280,7 +1461,13 @@ def _editor_page(ui, app, st: EditorState):
         # The iframe already shows the new geometry; rebuild without reloading
         # it so dragging feels instant. The next navigation picks up the build.
         st.snapshot()
-        ok = all(apply_geometry_item(a) for a in items)
+        try:
+            ok = all(apply_geometry_item(a) for a in items)
+        except (ValueError, IndexError) as exc:
+            st.undo.pop()
+            notify(f"Edit refused: {exc}", "warning")
+            refresh_all()
+            return
         st.commit()
         thumbs.refresh()
         inspector.refresh()
@@ -1323,9 +1510,7 @@ def _editor_page(ui, app, st: EditorState):
             sels = a.get("selection") or []
             if sels and sels[0].get("kind") == "block":
                 c, b = divmod(int(sels[0].get("index", 0)), 100)
-                if c < len(st.slide.cell_spans()) and b < len(st.slide.cell_flow_blocks(c)):
-                    st.selection = None
-                    mutate(lambda: st.slide.remove_cell_block(c, b))
+                delete_block(c, b, sels[0].get("count"))
         elif name in {"front", "back", "forward", "backward"}:
             items = selected_items(a)
             if items:
@@ -1354,6 +1539,7 @@ def _editor_page(ui, app, st: EditorState):
         def apply():
             chunk = st.slide
             first = None
+            pasted = []
             for block in st.clipboard:
                 chunk.append_raw(block)
                 if block.startswith("```place"):
@@ -1363,6 +1549,7 @@ def _editor_page(ui, app, st: EditorState):
                     spec.y += dp
                     chunk.set_place(idx, spec)
                     first = first or {"kind": "place", "index": idx}
+                    pasted.append({"kind": "place", "index": idx})
                 else:
                     idx = len(chunk.html_abs_refs()) - 1
                     if idx >= 0:
@@ -1371,8 +1558,7 @@ def _editor_page(ui, app, st: EditorState):
                         first = first or {"kind": "html", "index": idx}
             st.selection = first
             st.extra = []
-            if first:
-                _remap_copied_groups(chunk, [first] + st.extra)
+            _remap_copied_groups(chunk, pasted)
 
         mutate(apply)
 
@@ -1397,6 +1583,14 @@ def _editor_page(ui, app, st: EditorState):
 
         mutate(apply)
 
+    def _fresh_group_number(extra_used=()) -> int:
+        """Group names are unique across the deck (theme-slide groups included)."""
+        used = {r.spec.group for c in st.doc.slides for r in c.place_refs() if r.spec.group} | set(extra_used)
+        n = 1
+        while f"g{n}" in used:
+            n += 1
+        return n
+
     def _remap_copied_groups(chunk, sels):
         """Copies of grouped elements get a fresh group per original group."""
         mapping = {}
@@ -1407,10 +1601,7 @@ def _editor_page(ui, app, st: EditorState):
             if not spec.group:
                 continue
             if spec.group not in mapping:
-                used = {r.spec.group for r in chunk.place_refs() if r.spec.group}
-                n = 1
-                while f"g{n}" in used or f"g{n}" in mapping.values():
-                    n += 1
+                n = _fresh_group_number(set(mapping.values()))
                 mapping[spec.group] = f"g{n}"
             spec.group = mapping[spec.group]
             chunk.set_place(s2["index"], spec)
@@ -1466,10 +1657,7 @@ def _editor_page(ui, app, st: EditorState):
             idxs = sorted(set(idxs))
             if len(idxs) < 2:
                 return
-            used = {r.spec.group for r in chunk.place_refs() if r.spec.group}
-            n = 1
-            while f"g{n}" in used:
-                n += 1
+            n = _fresh_group_number()
             for k in idxs:
                 spec = chunk.get_place(k)
                 spec.group = f"g{n}"
@@ -1546,7 +1734,7 @@ def _editor_page(ui, app, st: EditorState):
             return chunk.get_title()
         if kind == "block":
             c, b = divmod(i, 100)
-            if c < len(chunk.cell_spans()) and b < len(chunk.cell_flow_blocks(c)):
+            if _block_ok(c, b, sel.get("count")):
                 return chunk.get_cell_block(c, b)
             return None
         if kind in {"cell", "content"}:
@@ -1619,7 +1807,7 @@ def _editor_page(ui, app, st: EditorState):
             set_title(value)
         elif kind == "block":
             c, b = divmod(i, 100)
-            set_block(c, b, value)
+            set_block(c, b, value, a.get("count"))
         elif kind in {"cell", "content"}:
             spans = st.slide.cell_spans()
             set_cell(i if i < len(spans) else 0, value)
@@ -1669,6 +1857,7 @@ def _editor_page(ui, app, st: EditorState):
     ui.on("ce-block-move", on_block_convert)
     ui.on("ce-block-resize", on_block_convert)
     ui.on("ce-cell-resize", on_cell_resize)
+    ui.on("ce-goto-master", on_goto_master)
     ui.on("ce-ready", on_ready)
     ui.on("ce-edit-request", on_edit_request)
     ui.on("ce-edit-commit", on_edit_commit)
