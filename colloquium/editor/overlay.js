@@ -847,9 +847,9 @@
     }
     if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); requestEdit(state.selection); return; }
     if (e.key === "Escape") { select(null, true); return; }
-    if (state.selection.kind === "block" && (e.key === "Delete" || e.key === "Backspace")) {
+    if ((state.selection.kind === "block" || state.selection.kind === "master") && (e.key === "Delete" || e.key === "Backspace")) {
       e.preventDefault();
-      emit("ce-command", { name: "delete_block", selection: [state.selection] });
+      emit("ce-command", { name: "delete_selection" });
       return;
     }
     if (!isMovable(state.selection)) return;

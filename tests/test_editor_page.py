@@ -163,3 +163,15 @@ async def test_two_sessions_share_document_but_not_selection(user: User, deck):
         assert b.st.doc.slides[0].get_title() == "Renamed"
         b.poll()
         assert b.seen_version == a.st.version
+
+
+async def test_delete_key_removes_selection(page, deck):
+    with page.client:
+        page.goto(1)
+        page.on_select(ev(kind="place", index=1))
+        page.on_key(SimpleNamespace(action=SimpleNamespace(keydown=True), key="Delete", modifiers=SimpleNamespace(ctrl=False, shift=False)))
+        assert "world" not in deck.read_text() and "hello" in deck.read_text()
+        page.goto(0)
+        page.on_select(ev(kind="block", index=1, cell=0, block=1, count=2))
+        page.on_command(ev(name="delete_selection"))
+        assert "- a\n- b" not in deck.read_text() and "Left para." in deck.read_text()

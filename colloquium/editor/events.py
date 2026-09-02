@@ -158,11 +158,8 @@ class EventsMixin:
             self.group_items(self.selected_items(a))
         elif name == "ungroup":
             self.ungroup_items(self.selected_items(a))
-        elif name == "delete_block":
-            sels = a.get("selection") or []
-            if sels and sels[0].get("kind") == "block":
-                c, b = divmod(int(sels[0].get("index", 0)), 100)
-                self.delete_block(c, b, sels[0].get("count"))
+        elif name == "delete_selection":
+            self.delete_selection()
         elif name in {"front", "back", "forward", "backward"}:
             items = self.selected_items(a)
             if items:
@@ -259,10 +256,22 @@ class EventsMixin:
         if self.ses.cropping and e.key == "Escape":
             ui.run_javascript("window.colloquiumEditor.cropCancel()")
             return
+        sel = self.ses.selection
+        items = [sel] + self.ses.extra if sel else []
         if e.modifiers.ctrl and e.key == "z":
             self.undo()
         elif e.modifiers.ctrl and (e.key == "y" or e.key == "Z"):
             self.redo()
+        elif e.key in {"Delete", "Backspace"}:
+            self.delete_selection()
+        elif e.modifiers.ctrl and e.key == "d" and sel:
+            self.duplicate_items(items)
+        elif e.modifiers.ctrl and e.key == "c" and sel:
+            self.copy_to_clipboard(items)
+        elif e.modifiers.ctrl and e.key == "v":
+            self.paste_clipboard(offset=not e.modifiers.shift)
+        elif e.modifiers.ctrl and e.key in {"g", "G"} and sel:
+            (self.ungroup_items if e.modifiers.shift else self.group_items)(items)
         elif e.key == "PageDown":
             self.goto(self.ses.index + 1)
         elif e.key == "PageUp":

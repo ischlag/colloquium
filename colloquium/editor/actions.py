@@ -350,6 +350,19 @@ class ActionsMixin:
 
         self.mutate(apply)
 
+    def delete_selection(self):
+        """Delete whatever is selected: placed elements (with the multi-selection) or a flow block."""
+        sel = self.ses.selection
+        if not sel:
+            return
+        if sel.get("kind") == "place":
+            self.delete_items([sel] + self.ses.extra)
+        elif sel.get("kind") == "block":
+            c, b = divmod(int(sel.get("index", 0)), 100)
+            self.delete_block(c, b, sel.get("count"))
+        elif sel.get("kind") == "master":
+            self.notify("Theme elements are deleted on the theme slide", "warning")
+
     def _fresh_group_number(self, extra_used=()) -> int:
         """Group names are unique across the deck (theme-slide groups included)."""
         used = {r.spec.group for c in self.st.doc.slides for r in c.place_refs() if r.spec.group} | set(extra_used)
