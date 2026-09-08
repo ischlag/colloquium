@@ -4,6 +4,8 @@ import re
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from colloquium.build import build_deck, build_file, _process_citations, _parse_bib_file, _build_references_slides_html
 from colloquium.deck import Deck
 from colloquium.elements import builtwith as builtwith_element
@@ -950,6 +952,43 @@ class TestCitationRendering:
             assert "colloquium-cite" in result
             assert "smith2024" in cited_keys
 
+    def test_citations_expand_only_outside_html_tags_and_comments(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            bib_entries = _parse_bib_file(bib_path)
+            cited_keys = []
+
+            result = _process_citations(
+                '<img alt="Figure [@smith2024]" data-note="2 > 1">'
+                '<span>See [@smith2024]</span><!-- [@smith2024] -->',
+                bib_entries,
+                "author-year",
+                cited_keys,
+            )
+
+            assert 'alt="Figure [@smith2024]" data-note="2 > 1"' in result
+            assert '<span>See <a href="#colloquium-ref-smith2024"' in result
+            assert '<!-- [@smith2024] -->' in result
+            assert result.count('class="colloquium-cite"') == 1
+
+    @pytest.mark.parametrize("comparison", ["< 5%", "<= 5%", "<5%"])
+    def test_citations_expand_between_comparisons_in_raw_html(self, comparison):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path)
+            deck.add_slide(
+                title="Results",
+                content=f"<div>Error {comparison} [@smith2024]; accuracy > 95%.</div>",
+            )
+
+            html = build_deck(deck)
+
+            assert (
+                f'<div>Error {comparison} '
+                '<a href="#colloquium-ref-smith2024" class="colloquium-cite">'
+                '(Smith &amp; Doe, 2024)</a>; accuracy > 95%.</div>'
+            ) in html
+
     def test_malformed_bib_warns_and_returns_empty(self, capsys):
         """A broken entry must not silently disable every citation."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1222,6 +1261,33 @@ class TestCitationRendering:
             assert "colloquium-cite" in html
             assert "References" in html
             assert "colloquium-reference" in html
+
+    def test_figure_caption_citation_does_not_corrupt_alt_attribute(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bib_path = self._make_bib(tmpdir)
+            deck = Deck(title="Test", bibliography=bib_path, figure_captions=True)
+            deck.add_slide(
+                title="Figure",
+                content=(
+                    "![Critical states in a simple gridworld navigation map "
+                    "[@smith2024] ](image.png)"
+                ),
+            )
+            html = build_deck(deck)
+
+            figure_start = html.index('<figure class="colloquium-figure">')
+            figure_end = html.index("</figure>", figure_start) + len("</figure>")
+            figure_html = html[figure_start:figure_end]
+
+            assert 'alt="Critical states in a simple gridworld navigation map [@smith2024] "' in figure_html
+            assert 'alt="Critical states in a simple gridworld navigation map <a' not in figure_html
+            assert (
+                '<figcaption class="colloquium-figure-caption">'
+                'Critical states in a simple gridworld navigation map '
+                '<a href="#colloquium-ref-smith2024" class="colloquium-cite">'
+                '(Smith &amp; Doe, 2024)</a></figcaption>'
+            ) in figure_html
+            assert figure_html.count('href="#colloquium-ref-smith2024"') == 1
 
     def test_numeric_citations_keep_global_numbers_across_slides(self):
         with tempfile.TemporaryDirectory() as tmpdir:
