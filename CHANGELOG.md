@@ -11,7 +11,7 @@ One line per PR for easy copy into GitHub releases.
 
 ## [Unreleased]
 
-- Fix bibliography citations in figure captions without corrupting image alt attributes ([#53](https://github.com/natolambert/colloquium/pull/53))
+- Fix bibliography citations in figure captions without corrupting image alt attributes, while preserving citations between literal comparisons in raw HTML ([#53](https://github.com/natolambert/colloquium/pull/53))
 - Overhaul PDF export fidelity: iframe embeds print as real page screenshots captured at export time (compact linked card as offline fallback), slide links keep their screen color, and ghostscript compression is off by default (`COLLOQUIUM_PDF_COMPRESS=1` to opt in) since gs 10.x breaks ICC profiles and blanks images in Apple's PDF viewers ([#51](https://github.com/natolambert/colloquium/pull/51))
 - Fix captioned-figure fitting overflowing captions onto the footer (reserve caption height, skip absolutely positioned figures) and add the opt-in `img-tall-right` class for full-slide-height right-column figures ([#50](https://github.com/natolambert/colloquium/pull/50))
 

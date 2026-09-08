@@ -399,8 +399,9 @@ def _process_fragments(
 # ===== Citation processing =====
 
 _CITATION_RE = re.compile(r'\[@([\w:.\-]+(?:\s*;\s*@[\w:.\-]+)*)\]')
+# Require a markup opener so comparisons such as "< 5% ... >" remain text.
 _HTML_TAG_RE = re.compile(
-    r'''<!--.*?-->|<(?:"[^"]*"|'[^']*'|[^'"<>])*>''',
+    r'''<!--.*?-->|<(?:/?[A-Za-z]|[!?])(?:"[^"]*"|'[^']*'|[^'"<>])*>''',
     re.DOTALL,
 )
 
