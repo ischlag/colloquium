@@ -399,6 +399,10 @@ def _process_fragments(
 # ===== Citation processing =====
 
 _CITATION_RE = re.compile(r'\[@([\w:.\-]+(?:\s*;\s*@[\w:.\-]+)*)\]')
+_HTML_TAG_RE = re.compile(
+    r'''<!--.*?-->|<(?:"[^"]*"|'[^']*'|[^'"<>])*>''',
+    re.DOTALL,
+)
 
 
 def _parse_bib_file(path: str) -> dict:
@@ -616,7 +620,12 @@ def _process_citations(
     citation_order: str = "auto",
     citation_numbers: dict[str, int] | None = None,
 ) -> str:
-    """Replace [@key] with citation links. Tracks cited keys."""
+    """Replace [@key] in HTML text with citation links. Tracks cited keys.
+
+    Tags and comments are copied verbatim so citation syntax in an attribute
+    cannot inject link markup into the surrounding tag.
+    """
+
     def _replace(m):
         raw = m.group(1)
         keys = [k.strip().lstrip("@") for k in raw.split(";")]
@@ -642,7 +651,14 @@ def _process_citations(
                 )
         return " ".join(parts)
 
-    return _CITATION_RE.sub(_replace, html)
+    parts = []
+    text_start = 0
+    for tag_match in _HTML_TAG_RE.finditer(html):
+        parts.append(_CITATION_RE.sub(_replace, html[text_start:tag_match.start()]))
+        parts.append(tag_match.group(0))
+        text_start = tag_match.end()
+    parts.append(_CITATION_RE.sub(_replace, html[text_start:]))
+    return "".join(parts)
 
 
 def _format_reference(entry, key: str, style: str, number: int) -> str:
