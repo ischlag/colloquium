@@ -185,19 +185,97 @@ def _inject_iframe_snapshots(html: str, browser: str) -> str:
     return _IFRAME_TAG_RE.sub(replace, html)
 
 
+_VIDEO_TAG_RE = re.compile(r"<video\b([^>]*)>(.*?)</video>", re.S | re.I)
+_SRC_ATTR_RE = re.compile(r'\bsrc="([^"]+)"', re.I)
+_STYLE_ATTR_RE = re.compile(r'\bstyle="([^"]*)"', re.I)
+_CLASS_ATTR_RE = re.compile(r'\bclass="([^"]*)"', re.I)
+
+
+def _video_start_seconds(src: str) -> float:
+    """Start time from a media fragment (``clip.mp4#t=20`` or ``#t=20,30``)."""
+    if "#" not in src:
+        return 0.0
+    frag = src.split("#", 1)[1]
+    m = re.search(r"(?:^|[&;])t=([0-9.]+)", frag)
+    try:
+        return float(m.group(1)) if m else 0.0
+    except ValueError:
+        return 0.0
+
+
+def _capture_video_frame(video_path: Path, start: float) -> str | None:
+    """Return the frame at ``start`` seconds as a base64 JPEG, via ffmpeg."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None or not video_path.exists():
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        cmd = [ffmpeg, "-v", "error", "-y", "-ss", f"{start:.3f}", "-i", str(video_path),
+               "-frames:v", "1", "-q:v", "2", str(tmp_path)]
+        subprocess.run(cmd, check=False, timeout=60, capture_output=True)
+        if tmp_path.exists() and tmp_path.stat().st_size > 1024:
+            return base64.b64encode(tmp_path.read_bytes()).decode("ascii")
+        return None
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _inject_video_frames(html: str, base_dir: Path) -> str:
+    """Replace each ``<video>`` by a still of the frame it starts on.
+
+    Chromium's print-to-pdf advances a virtual clock, so an autoplaying clip is
+    snapshotted at an arbitrary point. For print, show the frame the audience
+    sees first: the ``#t=`` fragment start, or the first frame. The still keeps
+    the video's ``style`` and ``class`` so the layout does not move.
+    """
+
+    def replace(match: re.Match) -> str:
+        attrs, inner = match.group(1), match.group(2)
+        m = _SRC_ATTR_RE.search(attrs) or _SRC_ATTR_RE.search(inner)
+        if not m:
+            return match.group(0)
+        src = html_module.unescape(m.group(1))
+        start = _video_start_seconds(src)
+        rel = src.split("#", 1)[0].split("?", 1)[0]
+        if re.match(r"^[a-z]+://", rel):
+            return match.group(0)
+        encoded = _capture_video_frame(base_dir / rel, start)
+        if encoded is None:
+            # Fall back to a paused element: Chromium prints the poster or first frame.
+            attrs_static = re.sub(r"\bautoplay\b", "", attrs)
+            return f'<video{attrs_static} preload="metadata">{inner}</video>'
+        style = _STYLE_ATTR_RE.search(attrs)
+        cls = _CLASS_ATTR_RE.search(attrs)
+        extra = ""
+        if style:
+            extra += f' style="{style.group(1)}"'
+        if cls:
+            extra += f' class="{cls.group(1)}"'
+        return f'<img{extra} src="data:image/jpeg;base64,{encoded}" alt="" />'
+
+    return _VIDEO_TAG_RE.sub(replace, html)
+
+
 @contextmanager
 def _print_ready_html(html_path: str, browser: str):
-    """Yield a path to print, with iframe snapshots injected when present.
+    """Yield a path to print, with iframe snapshots and video stills injected.
 
     The temp file lives next to the original so relative asset paths keep
     resolving, and is removed afterwards.
     """
     html_file = Path(html_path)
     html = html_file.read_text(encoding="utf-8")
-    if not _IFRAME_TAG_RE.search(html):
+    has_iframes = bool(_IFRAME_TAG_RE.search(html))
+    has_videos = bool(_VIDEO_TAG_RE.search(html))
+    if not has_iframes and not has_videos:
         yield html_path
         return
-    injected = _inject_iframe_snapshots(html, browser)
+    injected = _inject_iframe_snapshots(html, browser) if has_iframes else html
+    if has_videos:
+        injected = _inject_video_frames(injected, html_file.parent)
     tmp = html_file.with_name(f".{html_file.stem}-print{html_file.suffix}")
     tmp.write_text(injected, encoding="utf-8")
     try:
