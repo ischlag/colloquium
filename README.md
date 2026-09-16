@@ -82,6 +82,8 @@ Build it:
 colloquium build slides.md        # → slides.html
 colloquium serve slides.md        # dev server with live reload
 colloquium export slides.md       # PDF via a headless Chromium-based browser
+
+Videos print as a still of their start frame (or the `#t=` fragment start). Add `data-print-at="2"` to a `<video>` tag to print the frame at 2 s instead; the browser ignores the attribute.
 colloquium capture slides.md      # per-slide PNGs for AI review
 ```
 

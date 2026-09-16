@@ -188,6 +188,7 @@ def _inject_iframe_snapshots(html: str, browser: str) -> str:
 _VIDEO_TAG_RE = re.compile(r"<video\b([^>]*)>(.*?)</video>", re.S | re.I)
 _SRC_ATTR_RE = re.compile(r'\bsrc="([^"]+)"', re.I)
 _STYLE_ATTR_RE = re.compile(r'\bstyle="([^"]*)"', re.I)
+_PRINT_AT_ATTR_RE = re.compile(r'\bdata-print-at="([0-9.]+)"', re.I)
 _CLASS_ATTR_RE = re.compile(r'\bclass="([^"]*)"', re.I)
 
 
@@ -228,8 +229,10 @@ def _inject_video_frames(html: str, base_dir: Path) -> str:
 
     Chromium's print-to-pdf advances a virtual clock, so an autoplaying clip is
     snapshotted at an arbitrary point. For print, show the frame the audience
-    sees first: the ``#t=`` fragment start, or the first frame. The still keeps
-    the video's ``style`` and ``class`` so the layout does not move.
+    sees first: the ``#t=`` fragment start, or the first frame. A
+    ``data-print-at="SECONDS"`` attribute on the ``<video>`` picks another frame
+    for print only; the browser ignores it. The still keeps the video's
+    ``style`` and ``class`` so the layout does not move.
     """
 
     def replace(match: re.Match) -> str:
@@ -239,6 +242,12 @@ def _inject_video_frames(html: str, base_dir: Path) -> str:
             return match.group(0)
         src = html_module.unescape(m.group(1))
         start = _video_start_seconds(src)
+        print_at = _PRINT_AT_ATTR_RE.search(attrs)
+        if print_at:
+            try:
+                start = float(print_at.group(1))
+            except ValueError:
+                pass
         rel = src.split("#", 1)[0].split("?", 1)[0]
         if re.match(r"^[a-z]+://", rel):
             return match.group(0)
