@@ -364,6 +364,12 @@ This renders as `Figure 1: Training recipe overview`. Leave the alt text empty t
 ![](assets/recipe.png)
 ```
 
+Caption text can include bibliography citations, which render as links in the visible caption:
+
+```markdown
+![Training recipe overview [@christiano2017]](assets/recipe.png)
+```
+
 If you only want captions on selected slides, use `figure-captions` as a slide class instead:
 
 ```markdown
