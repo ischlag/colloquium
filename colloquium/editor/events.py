@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
+
 from nicegui import ui
 
 from colloquium.editor.document import format_grid_fractions
-from colloquium.editor.util import js
+from colloquium.editor.util import block_parts, js
 
 
 class EventsMixin:
@@ -24,6 +26,7 @@ class EventsMixin:
         ui.on("ce-block-image-size", self.on_block_image_size)
         ui.on("ce-cell-resize", self.on_cell_resize)
         ui.on("ce-goto-master", self.on_goto_master)
+        ui.on("ce-busy", self.on_busy)
         ui.on("ce-command", self.on_command)
         ui.on("ce-ready", self.on_ready)
         ui.on("ce-edit-request", self.on_edit_request)
@@ -71,21 +74,28 @@ class EventsMixin:
         items = (e.args or {}).get("items") or []
         if not items:
             return
+        # All or nothing: a half-applied group move would leave the slide in a
+        # state the user never asked for, so an unmappable item rejects the
+        # batch and the canvas is reloaded back to what the source says.
+        n = len(self.slide.place_refs())
+        if any(a.get("kind") != "place" or int(a["index"]) >= n for a in items):
+            self.notify("Some elements no longer match the source; nothing was moved", "warning")
+            self.refresh_all()
+            return
         # The iframe already shows the new geometry; rebuild without reloading
         # it so dragging feels instant. The next navigation picks up the build.
         st = self.st
         st.snapshot()
         try:
-            ok = all(self.apply_geometry_item(a) for a in items)
+            for a in items:
+                self.apply_geometry_item(a)
         except (ValueError, IndexError) as exc:
             st.undo.pop()
             self.notify(f"Edit refused: {exc}", "warning")
             self.refresh_all()
             return
-        st.commit(self.ses.index)
+        st.commit()
         self.refresh_all(reload_frame=False)
-        if not ok:
-            self.notify("Some elements could not be mapped to the source", "warning")
 
     def on_block_convert(self, e):
         a = e.args or {}
@@ -172,7 +182,7 @@ class EventsMixin:
         if kind == "title":
             return chunk.get_title()
         if kind == "block":
-            c, b = divmod(i, 100)
+            c, b = block_parts(i)
             return chunk.get_cell_block(c, b) if self.block_ok(c, b, sel.get("count")) else None
         if kind in {"cell", "content"}:
             spans = chunk.cell_spans()
@@ -197,7 +207,7 @@ class EventsMixin:
         if kind == "title":
             self.set_title(value)
         elif kind == "block":
-            c, b = divmod(i, 100)
+            c, b = block_parts(i)
             self.set_block(c, b, value, a.get("count"))
         elif kind in {"cell", "content"}:
             spans = self.slide.cell_spans()
@@ -279,11 +289,19 @@ class EventsMixin:
 
     def poll(self):
         """Pick up external edits of the .md and edits made from other tabs."""
-        st = self.st
-        if st.reload_from_disk():
-            self.ses.selection = None
-            self.refresh_all()
+        st, ses = self.st, self.ses
+        if ses.busy and time.monotonic() - ses.busy_at < 300:
+            return   # never pull the canvas out from under a drag, crop or open editor
+        reloaded = st.reload_from_disk()
+        if not reloaded and st.version == self.seen_version:
+            return
+        self._resync()
+        drifted = bool(ses.drifted)
+        self.refresh_all()          # reports the drift, if there was one
+        if reloaded and not drifted:
             self.notify("Reloaded from disk")
-        elif st.version != self.seen_version:
-            self.ses.clamp(len(st.doc.slides))
-            self.refresh_all()
+
+    def on_busy(self, e):
+        """The canvas reports that a drag, crop or in-place edit is (not) running."""
+        self.ses.busy = bool((e.args or {}).get("busy"))
+        self.ses.busy_at = time.monotonic()

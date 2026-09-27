@@ -28,6 +28,7 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
         self.ses = ses
         self.deck_dir = st.path.parent
         self.seen_version = st.version
+        self.synced_version = st.version
         self.client = context.client   # handlers run inside this client's UI context
         self._layout()
         self._register_events()
@@ -40,8 +41,31 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
     # --------------------------------------------------------- state helpers
     @property
     def slide(self):
+        """The slide this tab is on, following it if the deck changed elsewhere."""
+        if self.st.version != self.synced_version:
+            self._resync()
         self.ses.clamp(len(self.st.doc.slides))
         return self.st.doc.slides[self.ses.index]
+
+    def _resync(self) -> None:
+        """Keep this tab on its own slide after another tab or the file moved things.
+
+        Slide indices are not stable: an insert or delete elsewhere shifts
+        every later slide, and without this an edit here would land on a
+        different slide than the one on screen.
+        """
+        st, ses = self.st, self.ses
+        self.synced_version = st.version
+        texts = [s.text for s in st.doc.slides]
+        if ses.slide_text is None or (0 <= ses.index < len(texts) and texts[ses.index] == ses.slide_text):
+            return
+        if ses.slide_text in texts:
+            ses.index = texts.index(ses.slide_text)
+            ses.drifted = "The deck changed elsewhere; still on the same slide"
+        else:
+            ses.drifted = "The slide you were editing is gone; showing the deck as it is now"
+        ses.selection = None
+        ses.extra = []
 
     def preview_src(self) -> str:
         return f"/deck/__preview__.html?capture&edit&v={self.st.version}#{self.st.rendered_index(self.ses.index) + 1}"
@@ -67,6 +91,12 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
     # --------------------------------------------------------- refresh / mutate
     def refresh_all(self, reload_frame: bool = True, reload_thumbs: bool = True) -> None:
         self.seen_version = self.st.version
+        self.synced_version = self.st.version
+        self.ses.clamp(len(self.st.doc.slides))
+        self.ses.slide_text = self.st.doc.slides[self.ses.index].text
+        if self.ses.drifted:
+            self.notify(self.ses.drifted, "warning")
+            self.ses.drifted = ""
         if reload_thumbs:
             self.thumbs_frame.props(f'src="{self.thumbs_src()}"')
             self.thumbs_frame.update()
@@ -78,7 +108,7 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
             self.frame.props(f'src="{self.preview_src()}"')
             self.frame.update()
 
-    def mutate(self, fn, reload_frame: bool = True, whole_deck: bool = False) -> bool:
+    def mutate(self, fn, reload_frame: bool = True) -> bool:
         """Snapshot, apply fn() to the document, save, rebuild, refresh.
 
         Returns False (and reports) when the document layer refused the edit.
@@ -92,7 +122,7 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
             self.notify(f"Edit refused: {exc}", "warning")
             self.refresh_all(reload_frame)
             return False
-        st.commit(None if whole_deck else self.ses.index)
+        st.commit()
         self.ses.clamp(len(st.doc.slides))
         self.refresh_all(reload_frame)
         return True
@@ -103,6 +133,7 @@ class EditorPage(ActionsMixin, InspectorsMixin, ToolbarMixin, EventsMixin):
         self.ses.index = max(0, min(i, len(self.st.doc.slides) - 1))
         self.ses.selection = None
         self.ses.extra = []
+        self.ses.slide_text = self.st.doc.slides[self.ses.index].text
         self.refresh_all(reload_thumbs=False)
 
     def select(self, sel: dict | None, extra: list[dict] | None = None) -> None:

@@ -175,3 +175,121 @@ async def test_delete_key_removes_selection(page, deck):
         page.on_select(ev(kind="block", index=1, cell=0, block=1, count=2))
         page.on_command(ev(name="delete_selection"))
         assert "- a\n- b" not in deck.read_text() and "Left para." in deck.read_text()
+
+
+# ----- the preview must always be what the deck really builds to -------------
+
+def full_build(deck_path):
+    from colloquium.build import build_deck
+    from colloquium.parse import parse_markdown
+
+    return build_deck(parse_markdown(deck_path.read_text(encoding="utf-8")), include_master=True)
+
+
+async def test_preview_matches_a_full_build_after_every_kind_of_edit(page, deck):
+    with page.client:
+        page.goto(0)
+        page.set_title("Renamed")
+        assert page.st.html == full_build(deck)
+        page.goto(1)
+        page.on_geometry(ev(items=[{"kind": "place", "index": 0, "x": 11, "y": 12, "w": 20}]))
+        assert page.st.html == full_build(deck)
+        page.new_slide()
+        assert page.st.html == full_build(deck)
+        page.del_slide()
+        assert page.st.html == full_build(deck)
+
+
+async def test_blank_slide_that_gains_content_keeps_every_slide(page, deck):
+    with page.client:
+        page.st.doc.insert_slide(1, "")
+        page.st.commit()
+        page.goto(1)
+        assert page.st.html.count('<section class="slide') == 2
+        page.add_text()
+        assert page.st.html == full_build(deck)
+        assert page.st.html.count('<section class="slide') == 3
+
+
+async def test_raw_html_with_a_section_tag_does_not_corrupt_the_preview(page, deck):
+    with page.client:
+        page.goto(0)
+        page.set_raw('## First\n\n<div class="x">before</section>after</div>\n\nmore')
+        assert page.st.html == full_build(deck)
+
+
+# ----- one deck, several tabs ------------------------------------------------
+
+def second_tab(page):
+    from colloquium.editor.page import EditorPage
+    from colloquium.editor.state import Session
+
+    return EditorPage(page.st, Session())
+
+
+async def test_a_tab_follows_its_slide_when_another_tab_inserts_or_deletes(page, deck):
+    with page.client:
+        b = second_tab(page)
+        b.goto(1)
+        assert b.slide.get_title() == "Second"
+        page.goto(0)
+        page.new_slide()                      # shifts everything after slide 0
+        assert b.slide.get_title() == "Second", "tab B must still be on its own slide"
+        b.set_title("Renamed by B")
+        assert [s.get_title() for s in page.st.doc.slides] == ["First", "New slide", "Renamed by B"]
+        b.poll()
+        assert b.ses.drifted == ""
+
+
+async def test_a_tab_whose_slide_disappears_is_told(page, deck):
+    with page.client:
+        b = second_tab(page)
+        b.goto(1)
+        page.goto(1)
+        page.del_slide()
+        assert b.slide.get_title() == "First"
+        b.poll()
+        assert "gone" in b.ses.drifted or b.ses.drifted == ""
+
+
+async def test_an_external_edit_keeps_the_tab_on_its_slide(page, deck):
+    import os
+    import time
+
+    with page.client:
+        page.goto(1)
+        assert page.slide.get_title() == "Second"
+        deck.write_text("## Inserted\n\nnew\n\n---\n\n" + DECK.split("---\n", 1)[1].split("\n---\n\n")[0] + "\n\n---\n\n" + deck.read_text().split("---\n\n")[-1], encoding="utf-8")
+        os.utime(deck, (time.time() + 2, time.time() + 2))
+        page.poll()
+        assert page.slide.get_title() == "Second"
+
+
+# ----- refusals and guards ---------------------------------------------------
+
+async def test_geometry_batch_is_all_or_nothing(page, deck):
+    with page.client:
+        page.goto(1)
+        before = deck.read_text()
+        page.on_geometry(ev(items=[
+            {"kind": "place", "index": 0, "x": 33, "y": 33, "w": 20},
+            {"kind": "place", "index": 7, "x": 44, "y": 44, "w": 20},
+        ]))
+        assert deck.read_text() == before, "a batch with an unmappable item must change nothing"
+        page.on_geometry(ev(items=[{"kind": "place", "index": 0, "x": 33, "y": 33, "w": 20}]))
+        assert "x: 33" in deck.read_text()
+
+
+async def test_poll_does_not_reload_while_the_canvas_is_busy(page, deck):
+    import os
+    import time
+
+    with page.client:
+        page.on_busy(ev(busy=True))
+        deck.write_text(deck.read_text() + "\n\n---\n\n## Added behind the editor\n\nx\n", encoding="utf-8")
+        os.utime(deck, (time.time() + 2, time.time() + 2))
+        page.poll()
+        assert len(page.st.doc.slides) == 2, "a drag or open editor must not be interrupted"
+        page.on_busy(ev(busy=False))
+        page.poll()
+        assert len(page.st.doc.slides) == 3

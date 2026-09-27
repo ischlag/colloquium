@@ -15,6 +15,18 @@ SIZES = ["", "small", "large", "xl"]
 PADDINGS = ["", "none", "small", "large"]
 SHAPES = ["rect", "rounded", "ellipse", "line", "arrow"]
 
+# A block selection is identified by one integer, cell * BLOCK_STRIDE + block.
+# overlay.js declares the same stride; tests keep the two in step.
+BLOCK_STRIDE = 1000
+
+
+def block_index(cell: int, block: int) -> int:
+    return cell * BLOCK_STRIDE + block
+
+
+def block_parts(index) -> tuple[int, int]:
+    return divmod(int(index), BLOCK_STRIDE)
+
 
 def hex_color(value: str | None) -> str | None:
     """Return a #rrggbb colour for <input type=color>, or None if not representable."""

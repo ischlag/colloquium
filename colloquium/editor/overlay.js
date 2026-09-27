@@ -13,6 +13,7 @@
   const SNAP = 0.5;          // percent grid for drag/resize
   const CENTER_SNAP = 1.0;   // percent tolerance for snapping to slide centre
   const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const BLOCK_STRIDE = 1000; // a block selection is cell * BLOCK_STRIDE + block (util.py agrees)
   const PX_W = 12.8;         // slide-space px per percent (1280x720)
   const PX_H = 7.2;
 
@@ -28,6 +29,7 @@
     drag: null,
     editor: null,
     crop: null,
+    busy: false,
     dividers: [],
     suppressClick: 0,
   };
@@ -84,14 +86,30 @@
     return { x: ((clientX - r.left) / r.width) * 100, y: ((clientY - r.top) / r.height) * 100 };
   }
 
+  function rotationOf(el) {
+    const m = /rotate\(\s*(-?[\d.]+)deg\s*\)/.exec((el.style && el.style.transform) || "");
+    return m ? parseFloat(m[1]) : 0;
+  }
+
   function elPercentBox(el) {
     const r = slideRect();
     const b = el.getBoundingClientRect();
+    let left = b.left, top = b.top, w = b.width, h = b.height;
+    if (rotationOf(el) && el.offsetWidth && el.offsetHeight) {
+      // getBoundingClientRect gives the *rotated* bounding box; the source
+      // stores the unrotated one. Rotation keeps the centre, and the layout
+      // size is transform-free, so rebuild the box from those.
+      const scale = state.slide.offsetWidth ? r.width / state.slide.offsetWidth : 1;
+      w = el.offsetWidth * scale;
+      h = el.offsetHeight * scale;
+      left = b.left + b.width / 2 - w / 2;
+      top = b.top + b.height / 2 - h / 2;
+    }
     return {
-      x: ((b.left - r.left) / r.width) * 100,
-      y: ((b.top - r.top) / r.height) * 100,
-      w: (b.width / r.width) * 100,
-      h: (b.height / r.height) * 100,
+      x: ((left - r.left) / r.width) * 100,
+      y: ((top - r.top) / r.height) * 100,
+      w: (w / r.width) * 100,
+      h: (h / r.height) * 100,
     };
   }
 
@@ -158,8 +176,8 @@
       return cellEls()[sel.index] || content;
     }
     if (sel.kind === "block") {
-      const cell = cellEls()[Math.floor(sel.index / 100)];
-      const blk = cell ? blocksIn(cell)[sel.index % 100] || null : null;
+      const cell = cellEls()[Math.floor(sel.index / BLOCK_STRIDE)];
+      const blk = cell ? blocksIn(cell)[sel.index % BLOCK_STRIDE] || null : null;
       if (blk && sel.img !== undefined && sel.img !== null) return blk.querySelectorAll("img")[sel.img] || blk;
       return blk;
     }
@@ -175,7 +193,7 @@
 
   // ---------- hit testing ----------
   function hitTest(target) {
-    if (!state.slide.contains(target)) return null;
+    if (!state.slide || !state.slide.contains(target)) return null;
     if (target.closest(".ce-editor")) return null;
     const master = target.closest(".colloquium-place--master");
     if (master) return { kind: "master", index: parseInt(master.dataset.masterIndex, 10) };
@@ -194,7 +212,7 @@
         const blocks = blocksIn(cells[i]);
         for (let b = 0; b < blocks.length; b++) {
           if (blocks[b].contains(target)) {
-            const hit = { kind: "block", index: i * 100 + b, cell: i, block: b, count: blocks.length };
+            const hit = { kind: "block", index: i * BLOCK_STRIDE + b, cell: i, block: b, count: blocks.length };
             const k = img ? Array.from(blocks[b].querySelectorAll("img")).indexOf(img) : -1;
             if (k >= 0) hit.img = k;
             return hit;
@@ -246,6 +264,8 @@
   function updateBox(el) {
     const box = ensureBox();
     box.classList.remove("ce-box--locked");
+    const angle = rotationOf(el);
+    box.style.transform = angle ? "rotate(" + angle + "deg)" : "";
     const p = elPercentBox(el);
     setBoxGeometry(box, p);
     const ro = box.querySelector(".ce-readout");
@@ -346,8 +366,8 @@
     const el = elOf(sel);
     if (el && sel.kind === "block") payload.box = elPercentBox(el);
     if (sel.kind === "block") {
-      payload.cell = Math.floor(sel.index / 100);
-      payload.block = sel.index % 100;
+      payload.cell = Math.floor(sel.index / BLOCK_STRIDE);
+      payload.block = sel.index % BLOCK_STRIDE;
       const cont = cellEls()[payload.cell];
       payload.count = cont ? blocksIn(cont).length : 0;
       if (sel.img !== undefined && sel.img !== null) payload.img = sel.img;
@@ -408,7 +428,7 @@
     if (!sel) return null;
     let cellEl = null;
     if (sel.kind === "cell") cellEl = cellEls()[sel.index];
-    else if (sel.kind === "block") cellEl = cellEls()[Math.floor(sel.index / 100)];
+    else if (sel.kind === "block") cellEl = cellEls()[Math.floor(sel.index / BLOCK_STRIDE)];
     else if (sel.kind === "content") cellEl = cellEls()[0];
     if (!cellEl) return null;
     const content = state.slide.querySelector(".slide-content");
@@ -488,13 +508,14 @@
       mode: "cell-divider", axis: ctx.axis, row: ctx.row, container: ctx.container, k: k,
       orig: sizes, tracks: sizes.slice(), start: toPercent(e.clientX, e.clientY), moved: false,
     };
+    setBusy();
   }
 
   // ---------- geometry updates (batched) ----------
   function blockPayload(sel) {
-    const cell = Math.floor(sel.index / 100);
+    const cell = Math.floor(sel.index / BLOCK_STRIDE);
     const cont = cellEls()[cell];
-    const payload = { cell: cell, block: sel.index % 100, count: cont ? blocksIn(cont).length : 0 };
+    const payload = { cell: cell, block: sel.index % BLOCK_STRIDE, count: cont ? blocksIn(cont).length : 0 };
     if (sel.img !== undefined && sel.img !== null) payload.img = sel.img;
     return payload;
   }
@@ -520,8 +541,39 @@
     if (opts.height) el.style.height = box.h + "%";
   }
 
+  // ---------- busy / interrupted interactions ----------
+  function setBusy() {
+    // Python pauses its 1s refresh while the canvas is in the middle of
+    // something, so a reload never pulls the ground out from under a drag,
+    // a crop or an open text editor.
+    const busy = !!(state.editor || state.drag || state.crop);
+    if (busy !== state.busy) {
+      state.busy = busy;
+      emit("ce-busy", { busy: busy });
+    }
+  }
+
+  function cancelDrag() {
+    // A drag whose document is being replaced must not commit: its element
+    // and its indices belong to the old build.
+    const d = state.drag;
+    state.drag = null;
+    if (!d) return;
+    const els = d.members ? d.members.map((m) => m.el) : [d.el];
+    els.forEach((el) => {
+      if (!el || !el.style) return;
+      el.style.transform = "";
+      el.style.position = "";
+      el.style.zIndex = "";
+      if (d.mode === "resize-block") { el.style.width = ""; el.style.maxWidth = ""; }
+    });
+    if (state.guides) { state.guides.v.style.display = "none"; state.guides.h.style.display = "none"; }
+    setBusy();
+  }
+
   // ---------- mouse ----------
   function onMouseOver(e) {
+    if (!state.slide) return;
     state.doc.querySelectorAll(".ce-hover").forEach((el) => el.classList.remove("ce-hover"));
     if (state.drag || state.editor || state.crop) return;
     const hit = hitTest(e.target);
@@ -531,6 +583,7 @@
   }
 
   function onClick(e) {
+    if (!state.slide) return;
     if (state.crop) {
       e.preventDefault();
       e.stopPropagation();
@@ -557,7 +610,7 @@
 
   function onMouseDown(e) {
     state.downClient = { x: e.clientX, y: e.clientY };
-    if (e.button !== 0 || state.editor || state.crop) return;
+    if (!state.slide || e.button !== 0 || state.editor || state.crop) return;
     if (e.target.closest(".ce-box")) return;
     if (e.target.closest(".colloquium-place--master")) return; // locked: edited on the theme slide
     let el = e.target.closest(".colloquium-place");
@@ -574,6 +627,7 @@
       if (!bel) return;
       e.preventDefault();
       state.drag = { mode: "move-block", el: bel, sel: hit, start: toPercent(e.clientX, e.clientY), orig: elPercentBox(bel), moved: false };
+      setBusy();
       return;
     }
     if (e.shiftKey) return; // shift-click toggles membership on click
@@ -587,10 +641,12 @@
       mode: "move", members: members, primary: primary, start: toPercent(e.clientX, e.clientY),
       orig: elPercentBox(primary.el), moved: false,
     };
+    setBusy();
   }
 
   function onHandleDown(e) {
-    if (e.button !== 0 || !state.selection) return;
+    if (e.button !== 0 || !state.selection || !state.slide) return;
+    setTimeout(setBusy, 0);
     if (selectionGroupName()) {
       e.preventDefault();
       e.stopPropagation();
@@ -780,8 +836,9 @@
 
   function onMouseUp() {
     const d = state.drag;
-    if (!d) return;
+    if (!d) { setBusy(); return; }
     state.drag = null;
+    setBusy();
     if (state.guides) { state.guides.v.style.display = "none"; state.guides.h.style.display = "none"; }
     if (!d.moved) {
       if (d.mode === "move-block" || d.mode === "resize-block") {
@@ -801,7 +858,8 @@
         return;
       }
       payload.x = round(p.x); payload.y = round(p.y); payload.w = round(p.w);
-      emit(d.mode === "move-block" ? "ce-block-move" : "ce-block-resize", payload);
+      if (d.mode === "move-block") emit("ce-block-move", payload);
+      else emit("ce-block-resize", payload);
       return;
     }
     if (d.mode === "resize-group") {
@@ -822,6 +880,7 @@
 
   // ---------- keyboard ----------
   function onKeyDown(e) {
+    if (!state.slide) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     const ctrl = e.ctrlKey || e.metaKey;
@@ -973,6 +1032,7 @@
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
     ta.style.height = ta.scrollHeight + "px";
+    setBusy();
   }
 
   function closeEditor(commit) {
@@ -982,11 +1042,14 @@
     const value = ed.ta.value;
     if (ed.ta.parentNode) ed.ta.parentNode.removeChild(ed.ta);
     applySelection();
-    if (commit && value !== ed.original) emit("ce-edit-commit", { kind: ed.sel.kind, index: ed.sel.index, value: value });
+    setBusy();
+    if (commit && value !== ed.original) {
+      emit("ce-edit-commit", { kind: ed.sel.kind, index: ed.sel.index, count: ed.sel.count, value: value });
+    }
   }
 
   function onDblClick(e) {
-    if (state.editor || state.crop) return;
+    if (!state.slide || state.editor || state.crop) return;
     const hit = hitTest(e.target);
     if (!hit || hit.kind === "slide") return;
     e.preventDefault();
@@ -1067,6 +1130,7 @@
     state.doc.addEventListener("mouseup", cropUp, true);
     // Keyboard (Enter/Esc) lives in the iframe, so take focus from the toolbar.
     try { state.iframe.contentWindow.focus(); state.doc.body.focus(); } catch (err) { /* ignore */ }
+    setBusy();
     emit("ce-crop-state", { active: true });
   }
 
@@ -1142,6 +1206,7 @@
     state.doc.removeEventListener("mouseup", cropUp, true);
     [c.ghost, c.frame, c.hint].forEach((n) => n.parentNode && n.parentNode.removeChild(n));
     state.crop = null;
+    setBusy();
     emit("ce-crop-state", { active: false });
   }
 
@@ -1183,19 +1248,23 @@
     let doc;
     try { doc = iframe.contentDocument; } catch (err) { return; }
     if (!doc || !doc.body) return;
+    // Python re-sends the selection on ce-ready; a stale one would draw boxes
+    // on the wrong slide, and a live drag or editor belongs to the old build.
+    state.selection = null;
+    state.extra = [];
+    state.slide = null;
+    closeEditor(true);   // a reload must not swallow what the user typed
+    cancelDrag();
     state.doc = doc;
     state.box = null;
     state.extraBoxes = [];
     state.guides = null;
-    state.editor = null;
     const style = doc.createElement("style");
     style.textContent = STYLE;
     doc.head.appendChild(style);
-    // Python re-sends the selection on ce-ready; a stale one would draw boxes on the wrong slide.
-    state.selection = null;
-    state.extra = [];
     const refreshSlide = () => {
-      state.editor = null;
+      closeEditor(true);
+      cancelDrag();
       if (state.crop) cropExit();
       const next = doc.querySelector(".slide.active");
       if (state.slide && next !== state.slide) { state.selection = null; state.extra = []; }
@@ -1247,6 +1316,9 @@
     cropCancel() { cropCancel(); },
     cropActive() { return !!state.crop; },
     resetSize() { resetSize(); },
+    // Exposed for the node tests in tests/test_editor_overlay_js.py, which
+    // drive the geometry maths against a stub document.
+    _internals: { state: state, rotationOf: rotationOf, elPercentBox: elPercentBox, cancelDrag: cancelDrag, setBusy: setBusy },
     convertBlock() {
       const sel = state.selection;
       if (!sel || sel.kind !== "block") return;

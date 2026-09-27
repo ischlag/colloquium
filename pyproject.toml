@@ -45,4 +45,6 @@ packages = ["colloquium"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# nicegui.testing.user_plugin looks for an app entry point; the editor tests
+# register their own page, so point it at nothing.
 main_file = ""

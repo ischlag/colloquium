@@ -9,6 +9,7 @@ from nicegui import ui
 from colloquium.editor import images
 from colloquium.editor import theme as theme_mod
 from colloquium.editor.picker import fs_browser
+from colloquium.editor.util import block_index, block_parts
 from colloquium.elements import place
 
 
@@ -42,7 +43,7 @@ class ActionsMixin:
             self.ses.index += 1
             self.ses.selection = None
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
 
     def dup_slide(self):
         def apply():
@@ -50,7 +51,7 @@ class ActionsMixin:
             self.ses.index += 1
             self.ses.selection = None
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
 
     def del_slide(self):
         if len(self.st.doc.slides) <= 1:
@@ -62,14 +63,14 @@ class ActionsMixin:
             self.ses.index = min(self.ses.index, len(self.st.doc.slides) - 1)
             self.ses.selection = None
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
 
     def move_slide_to(self, src: int, dst: int):
         def apply():
             self.st.doc.move_slide(src, dst)
             self.ses.index = dst
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
 
     def theme_slide(self):
         masters = self.st.doc.master_indices()
@@ -83,7 +84,7 @@ class ActionsMixin:
             self.ses.selection = None
             self.ses.extra = []
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
         self.notify("Theme slide added at the top; it is not part of the presentation")
 
     def goto_master(self, i: int):
@@ -106,7 +107,7 @@ class ActionsMixin:
         cur = self.slide.get_directive(key) or ""
         if (value or "").strip() == cur:
             return
-        self.mutate(lambda: self.slide.set_directive(key, value), whole_deck=key in {"after", "master"})
+        self.mutate(lambda: self.slide.set_directive(key, value))
 
     def set_cell(self, i: int, value: str):
         if value.strip("\n") == self.slide.get_cell(i):
@@ -125,7 +126,7 @@ class ActionsMixin:
         def apply():
             self.slide.text = value.strip("\n")
 
-        self.mutate(apply, whole_deck=True)
+        self.mutate(apply)
 
     # ------------------------------------------------------------- blocks
     def block_ok(self, c: int, b: int, count=None) -> bool:
@@ -135,7 +136,7 @@ class ActionsMixin:
             return False
         blocks = chunk.cell_blocks(c)
         sel = self.ses.selection
-        if count is None and sel and sel.get("kind") == "block" and sel.get("index") == c * 100 + b:
+        if count is None and sel and sel.get("kind") == "block" and sel.get("index") == block_index(c, b):
             count = sel.get("count")
         if b >= len(blocks) or (count is not None and int(count) != len(blocks)):
             self.notify("Cannot map this block to the markdown source; edit the cell instead", "warning")
@@ -358,7 +359,7 @@ class ActionsMixin:
         if sel.get("kind") == "place":
             self.delete_items([sel] + self.ses.extra)
         elif sel.get("kind") == "block":
-            c, b = divmod(int(sel.get("index", 0)), 100)
+            c, b = block_parts(sel.get("index", 0))
             self.delete_block(c, b, sel.get("count"))
         elif sel.get("kind") == "master":
             self.notify("Theme elements are deleted on the theme slide", "warning")
@@ -426,7 +427,7 @@ class ActionsMixin:
         css = self.st.doc.get_custom_css()
         if new == css:
             return
-        self.mutate(lambda: self.st.doc.set_custom_css(new), whole_deck=True)
+        self.mutate(lambda: self.st.doc.set_custom_css(new))
 
     def set_theme_var(self, name: str, value: str | None):
         self._set_css(theme_mod.set_root_var(self.st.doc.get_custom_css(), name, value))

@@ -10,6 +10,7 @@ emitted byte for byte, so git diffs only show what actually changed.
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 
 import yaml
 from dataclasses import dataclass, field
@@ -22,8 +23,10 @@ _SEPARATOR_RE = re.compile(r"(\n---[ \t]*\n)")
 _FRONTMATTER_RE = re.compile(r"\A(\s*---[ \t]*\n.*?\n---[ \t]*\n)", re.DOTALL)
 _DIRECTIVE_RE = re.compile(r"<!--\s*([a-z][a-z-]*)\s*:\s*(.*?)\s*-->[ \t]*\n?", re.DOTALL)
 _TITLE_RE = re.compile(r"^(#{1,2}) (.*)$", re.MULTILINE)
-_COLUMN_SPLIT_RE = re.compile(r"^\|\|\|[ \t]*$", re.MULTILINE)
-_ROW_SPLIT_RE = re.compile(r"^===[ \t]*$", re.MULTILINE)
+# The build splits rows on the raw source with this exact pattern
+# (build.py `_ROW_SPLIT_RE`) and columns on a rendered `<p>|||</p>`,
+# so the editor mirrors both instead of re-deriving its own rule.
+_ROW_SPLIT_RE = re.compile(r"^\s*===+\s*$", re.MULTILINE)
 _CUSTOM_CSS_BLOCK_RE = re.compile(r"^custom_css:[ \t]*\|[-+]?[ \t]*\n((?:[ \t]+[^\n]*\n|[ \t]*\n)*)", re.MULTILINE)
 _CELL_STYLE_RE = re.compile(r"<!--\s*cell-style\s*:\s*(.*?)\s*-->[ \t]*\n?", re.DOTALL)
 _ROW_COLUMNS_RE = re.compile(r"<!--\s*row-columns\s*:\s*(.*?)\s*-->", re.DOTALL)
@@ -107,15 +110,12 @@ class SlideChunk:
 
     # ----- title --------------------------------------------------------
     def _title_match(self) -> re.Match | None:
-        stripped = _DIRECTIVE_RE.sub(lambda m: " " * len(m.group(0)), self.text)
-        m = _TITLE_RE.search(stripped)
-        if not m:
-            return None
-        # Ensure it is the first non-directive, non-blank line.
-        before = stripped[: m.start()]
-        if before.strip():
-            return None
-        return m
+        # Blank the directives but keep the line structure: the title may sit on
+        # the very next line, and `^` has to still match there.
+        stripped = _DIRECTIVE_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), self.text)
+        # parse.py takes the first `# `/`## ` line of the slide as the title,
+        # wherever it sits, and renders it outside the content area.
+        return _TITLE_RE.search(stripped)
 
     def get_title(self) -> str:
         m = self._title_match()
@@ -174,27 +174,106 @@ class SlideChunk:
         self.text = (f"{head}\n\n{body}" if head and body else head or body).strip("\n")
 
     # ----- cells (columns / rows) ----------------------------------------
-    def cell_spans(self) -> list[tuple[int, int]]:
-        """Spans of column/row cells in the body, split on ``|||`` and ``===``.
+    def _grid_spec(self, key: str) -> str | None:
+        """The columns/rows spec the build will act on, or None when it will not split."""
+        from colloquium.parse import _normalize_grid_spec
 
-        Place blocks are masked first so separators inside them are ignored.
+        spec = _normalize_grid_spec(self.get_directive(key) or "")
+        if spec:
+            return spec
+        prefix = "cols-" if key == "columns" else "rows-"
+        for cls in (self.get_directive("class") or "").split():
+            if cls.startswith(prefix):
+                return cls[len(prefix):]
+        return None
+
+    @staticmethod
+    def _mask_places(text: str) -> str:
+        """Blank out place blocks, which the build extracts before splitting.
+
+        Comments stay: the build splits rows on the raw source, where a
+        ``row-columns`` comment is still present and must land inside its row.
+        """
+        return place.PLACE_FENCE_RE.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+    @staticmethod
+    def _line_spans(seg: str):
+        starts = [0] + [m.end() for m in re.finditer(r"\n", seg)]
+
+        def span(a: int, b: int) -> tuple[int, int]:
+            return (starts[a] if a < len(starts) else len(seg),
+                    starts[b] if b < len(starts) else len(seg))
+
+        return span
+
+    def _row_cuts(self, masked: str, start: int) -> list[tuple[int, int]]:
+        """Absolute spans of the ``===``-separated rows, empty rows dropped (as the build does)."""
+        spans, pos = [], 0
+        for m in _ROW_SPLIT_RE.finditer(masked):
+            spans.append((pos, m.start()))
+            pos = m.end()
+        spans.append((pos, len(masked)))
+        return [(start + a, start + b) for a, b in spans if masked[a:b].strip()]
+
+    def _column_cuts(self, seg: str) -> list[tuple[int, int]]:
+        """Line spans of the ``|||`` separator paragraphs the build splits on.
+
+        Only a paragraph that is nothing but ``|||`` renders as ``<p>|||</p>``;
+        a ``|||`` swallowed by the paragraph above it (no blank line) does not
+        split, and neither does one inside a fence or a list.
+        """
+        span = self._line_spans(seg)
+        tokens = _md().parse(seg)
+        cuts = []
+        for i, t in enumerate(tokens):
+            if t.type != "paragraph_open" or t.level != 0 or t.map is None:
+                continue
+            inline = tokens[i + 1] if i + 1 < len(tokens) else None
+            if inline is not None and inline.type == "inline" and inline.content.strip() == "|||":
+                cuts.append(span(t.map[0], t.map[1]))
+        return cuts
+
+    def _masked_body(self) -> tuple[int, int, str]:
+        """The body span and a copy of it with what the build removes blanked out.
+
+        Place blocks move to their own layer and the title is rendered outside
+        the content area, so neither is a child of a cell.
         """
         start, end = self._body_span()
-        body = self.text[start:end]
-        masked = _mask_fences(body)
-        for ref in self._place_refs_in(body):
-            masked = masked[: ref.start] + " " * (ref.end - ref.start) + masked[ref.end:]
-        cuts = sorted(
-            [m for m in _COLUMN_SPLIT_RE.finditer(masked)] + [m for m in _ROW_SPLIT_RE.finditer(masked)],
-            key=lambda m: m.start(),
-        )
-        spans = []
-        pos = 0
-        for m in cuts:
-            spans.append((start + pos, start + m.start()))
-            pos = m.end()
-        spans.append((start + pos, end))
-        return spans
+        masked = self._mask_places(self.text[start:end])
+        m = self._title_match()
+        if m and start <= m.start() < end:
+            a, b = m.start() - start, m.end() - start
+            masked = masked[:a] + re.sub(r"[^\n]", " ", masked[a:b]) + masked[b:]
+        return start, end, masked
+
+    def cell_spans(self) -> list[tuple[int, int]]:
+        """Spans of the column/row cells, in the order the browser renders them.
+
+        Mirrors the build: rows split on ``===`` lines in the source (empty
+        rows dropped), a row splits into columns only when it carries
+        ``row-columns``, and a slide without rows splits on ``|||``
+        paragraphs only when it declares ``columns``.
+        """
+        start, end, masked = self._masked_body()
+        has_rows = bool(self._grid_spec("rows"))
+        rows = self._row_cuts(masked, start) if has_rows else [(start, end)]
+        spans: list[tuple[int, int]] = []
+        for rs, re_ in rows:
+            seg = masked[rs - start: re_ - start]
+            if has_rows:
+                split_cols = bool(_ROW_COLUMNS_RE.search(self.text[rs:re_]))
+            else:
+                split_cols = bool(self._grid_spec("columns"))
+            if not split_cols:
+                spans.append((rs, re_))
+                continue
+            pos = rs
+            for cs, ce in self._column_cuts(seg):
+                spans.append((pos, rs + cs))
+                pos = rs + ce
+            spans.append((pos, re_))
+        return spans or [(start, end)]
 
     def _kept_spans(self, text: str) -> list[tuple[int, int]]:
         """Spans the cell editor hides but must preserve: the place blocks."""
@@ -307,7 +386,16 @@ class SlideChunk:
             if b <= a:
                 continue
             if t.type == "html_block":
-                out.extend(_html_elements(masked, a, b))
+                blocks, unterminated = _html_elements(masked, a, b)
+                out.extend(blocks)
+                if unterminated:
+                    # An element left open swallows everything after it, so the
+                    # cell has no further children; match the browser and stop.
+                    tail = len(masked.rstrip())
+                    if out:
+                        out[-1].end = tail
+                        out[-1].inner_end = tail
+                    break
             else:
                 out.append(Block(a, b, "md"))
         for blk in out:
@@ -421,19 +509,11 @@ class SlideChunk:
 
     # ----- rows and grid fractions --------------------------------------------
     def row_spans(self) -> list[tuple[int, int]]:
-        """Spans of ``===``-separated rows in the body (place blocks masked)."""
+        """Spans of the ``===``-separated rows the build will create."""
         start, end = self._body_span()
-        body = self.text[start:end]
-        masked = body
-        for ref in self._place_refs_in(body):
-            masked = masked[: ref.start] + " " * (ref.end - ref.start) + masked[ref.end :]
-        spans = []
-        pos = 0
-        for m in _ROW_SPLIT_RE.finditer(masked):
-            spans.append((start + pos, start + m.start()))
-            pos = m.end()
-        spans.append((start + pos, end))
-        return spans
+        if not self._grid_spec("rows"):
+            return [(start, end)]
+        return self._row_cuts(self._mask_places(self.text[start:end]), start)
 
     def set_row_columns(self, row: int, value: str) -> None:
         """Set the ``<!-- row-columns: ... -->`` spec inside row *row*."""
@@ -535,8 +615,15 @@ _CSS_DECL_RE = re.compile(r"\s*([a-zA-Z-]+)\s*:\s*([^;]*?)\s*(?:;|$)")
 
 
 _POS_DECL_RE = re.compile(r"(?<![\w-])(?:top|left)\s*:")
-_TAG_RE = re.compile(r"<!--.*?-->|<(/?)([a-zA-Z][\w-]*)([^<>]*?)(/?)>", re.DOTALL)
 _VOID_TAGS = {"img", "br", "hr", "input", "source", "meta", "link", "area", "base", "col", "embed", "track", "wbr"}
+# Start tags that close an open <p>, per HTML5's "a p element is closed by a
+# following block-level start tag". Needed so the block list matches the DOM
+# for hand-written HTML that leaves paragraphs open.
+_BLOCK_TAGS = {
+    "address", "article", "aside", "blockquote", "details", "div", "dl", "fieldset",
+    "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "section", "table", "ul",
+}
 _md_instance = None
 
 
@@ -557,10 +644,14 @@ class Block:
     end: int
     kind: str                 # "md" (markdown block) or "html" (raw element)
     tag: str = ""
-    attrs: str = ""
-    style: str = ""
+    attrs: str = ""           # raw attribute text of the opening tag
+    attrs_map: dict = field(default_factory=dict)
     inner_start: int = 0
     inner_end: int = 0
+
+    @property
+    def style(self) -> str:
+        return (self.attrs_map.get("style") or "").strip()
 
     @property
     def positioned(self) -> bool:
@@ -568,59 +659,101 @@ class Block:
 
     @property
     def classes(self) -> list[str]:
-        m = re.search(r"""\bclass\s*=\s*("([^"]*)"|'([^']*)')""", self.attrs)
-        return (m.group(2) or m.group(3) or "").split() if m else []
+        return (self.attrs_map.get("class") or "").split()
 
     def px(self, key: str) -> float | None:
         return _px(dict(parse_inline_style(self.style)).get(key, ""))
 
 
-def _style_of(attrs: str) -> str:
-    m = re.search(r"""\bstyle\s*=\s*("([^"]*)"|'([^']*)')""", attrs)
-    return (m.group(2) or m.group(3) or "").strip() if m else ""
+class _TopLevelHTML(HTMLParser):
+    """Collect the outermost elements of a raw-HTML region, as a browser would.
+
+    Quoted attribute values may contain ``<`` and ``>``; an unclosed element
+    swallows the rest of the region; a stray end tag is ignored. Comments and
+    bare text produce no element, matching what the DOM exposes as children.
+    """
+
+    def __init__(self, region: str, base: int = 0):
+        super().__init__(convert_charrefs=False)
+        self.region = region
+        self.base = base   # not `offset`: HTMLParser keeps the current column there
+        self.blocks: list[Block] = []
+        self._stack: list[str] = []
+        self._open: tuple | None = None
+        self._line_starts = [0] + [m.end() for m in re.finditer(r"\n", region)]
+
+    # ----- positions
+    def _pos(self) -> int:
+        line, col = self.getpos()
+        return self._line_starts[line - 1] + col if line - 1 < len(self._line_starts) else len(self.region)
+
+    def _tag_end(self, start: int) -> int:
+        i = self.region.find(">", start)
+        return len(self.region) if i < 0 else i + 1
+
+    # ----- emitting
+    def _emit(self, start, end, tag, attrs, attrs_map, inner_start, inner_end) -> None:
+        self.blocks.append(Block(
+            start=self.base + start, end=self.base + end, kind="html", tag=tag,
+            attrs=attrs, attrs_map=attrs_map,
+            inner_start=self.base + inner_start, inner_end=self.base + inner_end,
+        ))
+
+    def _close_open(self, end: int, inner_end: int) -> None:
+        start, tag, attrs, attrs_map, inner_start = self._open
+        self._emit(start, end, tag, attrs, attrs_map, inner_start, inner_end)
+        self._open = None
+
+    # ----- parser callbacks
+    def handle_starttag(self, tag, attrs, self_closing=False):
+        start = self._pos()
+        raw = self.get_starttag_text() or f"<{tag}>"
+        end = start + len(raw)
+        attrs_text = raw[1 + len(tag):].rstrip(">").rstrip("/")
+        attrs_map = {k.lower(): (v or "") for k, v in attrs}
+        while self._stack and self._stack[-1] == "p" and tag in _BLOCK_TAGS:
+            self._stack.pop()
+            if not self._stack and self._open:
+                cut = len(self.region[:start].rstrip())
+                self._close_open(cut, cut)
+        if self_closing or tag in _VOID_TAGS:
+            if not self._stack:
+                self._emit(start, end, tag, attrs_text, attrs_map, end, end)
+            return
+        if not self._stack:
+            self._open = (start, tag, attrs_text, attrs_map, end)
+        self._stack.append(tag)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs, self_closing=True)
+
+    def handle_endtag(self, tag):
+        if tag not in self._stack:
+            return
+        start = self._pos()
+        end = self._tag_end(start)
+        while self._stack and self._stack.pop() != tag:
+            pass
+        if not self._stack and self._open:
+            self._close_open(end, start)
+
+    def finish(self) -> tuple[list[Block], bool]:
+        """The blocks, and whether the region left an element open."""
+        self.close()
+        unterminated = self._open is not None
+        if self._open:   # unclosed element: the browser lets it swallow the rest
+            self._close_open(len(self.region), len(self.region))
+        return self.blocks, unterminated
 
 
-def _html_elements(text: str, a: int, b: int) -> list[Block]:
-    """Top-level elements of the raw HTML in text[a:b] (comments and bare text render no element)."""
-    out: list[Block] = []
-    stack: list[str] = []
-    cur: tuple[int, str, str, int] | None = None
-    for m in _TAG_RE.finditer(text, a, b):
-        if m.group(0).startswith("<!--"):
-            continue
-        closing, tag, attrs, selfclose = m.group(1), m.group(2).lower(), m.group(3), m.group(4)
-        if not closing:
-            if tag in _VOID_TAGS or selfclose:
-                if not stack:
-                    out.append(Block(m.start(), m.end(), "html", tag, attrs, _style_of(attrs), m.end(), m.end()))
-                continue
-            if not stack:
-                cur = (m.start(), tag, attrs, m.end())
-            stack.append(tag)
-        elif tag in stack:
-            while stack and stack.pop() != tag:
-                pass
-            if not stack and cur:
-                out.append(Block(cur[0], m.end(), "html", cur[1], cur[2], _style_of(cur[2]), cur[3], m.start()))
-                cur = None
-    return out
-
-
-def _mask_fences(text: str) -> str:
-    """Blank out the lines inside fenced code so separators there are ignored."""
-    out = []
-    fence = False
-    for line in text.splitlines(keepends=True):
-        stripped = line.strip()
-        is_fence = stripped.startswith("```") or stripped.startswith("~~~")
-        if is_fence:
-            fence = not fence
-            out.append(re.sub(r"[^\n]", " ", line))
-        elif fence:
-            out.append(re.sub(r"[^\n]", " ", line))
-        else:
-            out.append(line)
-    return "".join(out)
+def _html_elements(text: str, a: int, b: int) -> tuple[list[Block], bool]:
+    """Top-level elements of the raw HTML in text[a:b], and whether a tag stayed open."""
+    parser = _TopLevelHTML(text[a:b], a)
+    try:
+        parser.feed(text[a:b])
+        return parser.finish()
+    except Exception:   # never let malformed HTML break the editor
+        return [], False
 
 
 def parse_inline_style(style: str) -> list[tuple[str, str]]:

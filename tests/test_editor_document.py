@@ -495,7 +495,7 @@ def test_positioned_div_converts_with_its_own_position():
 
 
 def test_block_images_resize_and_lift():
-    chunk = SlideChunk("## T\n\n![A figure](images/fig.png)\n\n|||\n\nText <img src=\"b.png\" alt=\"B\" style=\"height: 380px; width: auto; border-radius: 8px;\"> more")
+    chunk = SlideChunk("## T\n\n<!-- columns: 2 -->\n\n![A figure](images/fig.png)\n\n|||\n\nText <img src=\"b.png\" alt=\"B\" style=\"height: 380px; width: auto; border-radius: 8px;\"> more")
     assert [src for _, _, src in chunk.block_images(0, 0)] == ["images/fig.png"]
     chunk.set_block_image_size(0, 0, 0, width_px=512.4)
     assert '<img src="images/fig.png" alt="A figure" style="width: 512px">' in chunk.text
@@ -508,7 +508,7 @@ def test_block_images_resize_and_lift():
     assert chunk.get_cell(1) == "Text  more"
     idx2 = chunk.convert_block_image_to_place(0, 0, 0, 1, 2, 3)
     assert chunk.get_place(idx2).src == "images/fig.png"
-    assert chunk.get_cell(0) == ""
+    assert chunk.get_cell(0) == "<!-- columns: 2 -->"
 
 
 def test_column_separator_inside_code_fence_is_ignored():

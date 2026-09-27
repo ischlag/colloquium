@@ -7,8 +7,6 @@ from pathlib import Path
 
 from colloquium.editor.document import DeckDocument
 
-_SECTION_RE_TEMPLATE = r'<section class="slide [^"]*" data-index="{n}".*?</section>'
-
 
 class EditorState:
     """Per-deck state shared by every client: document, undo history, last build."""
@@ -22,7 +20,6 @@ class EditorState:
         self.redo: list[str] = []
         self.version = 0
         self.html = ""
-        self._master_text = None
         self.last_written_mtime = 0.0
         self.last_known_mtime = path.stat().st_mtime
         self.rebuild()
@@ -36,38 +33,21 @@ class EditorState:
             deck.bibliography = str(self.path.parent / deck.bibliography)
         return deck
 
-    def rebuild(self, changed: int | None = None) -> None:
-        """Rebuild the preview HTML; a single changed slide is re-rendered alone when safe."""
+    def rebuild(self) -> None:
+        """Rebuild the preview HTML.
+
+        Always a full build: it costs a few tens of milliseconds even for a
+        40-slide deck, and every attempt at patching a single ``<section>``
+        into the cached HTML drifts from what the deck really renders as
+        (slide counters, outline blocks, citation numbering, element ids).
+        """
         from colloquium.build import build_deck
 
-        deck = self._deck()
-        master_text = "\n".join(self.doc.slides[i].text for i in self.doc.master_indices())
         try:
-            if changed is None or master_text != self._master_text or not self._rebuild_one(deck, changed):
-                self.html = build_deck(deck, include_master=True)
+            self.html = build_deck(self._deck(), include_master=True)
         except Exception as exc:  # keep the editor alive on a bad build
             self.html = f"<html><body><pre>Build failed:\n{exc}</pre></body></html>"
-        self._master_text = master_text
         self.version += 1
-
-    def _rebuild_one(self, deck, src_index: int) -> bool:
-        """Re-render only slide *src_index* into the cached HTML. False when a full build is needed."""
-        from colloquium.build import build_slide_section
-
-        if not self.html or deck.bibliography or src_index >= len(self.doc.slides):
-            return False
-        chunk = self.doc.slides[src_index]
-        if chunk.is_master or not chunk.text.strip() or "```outline" in chunk.text:
-            return False
-        rendered = self.rendered_index(src_index)
-        pattern = re.compile(_SECTION_RE_TEMPLATE.format(n=rendered), re.DOTALL)
-        if len(pattern.findall(self.html)) != 1:
-            return False
-        section = build_slide_section(deck, rendered)
-        if section is None:
-            return False
-        self.html = pattern.sub(lambda _: section, self.html, count=1)
-        return True
 
     def rendered_index(self, src_index: int) -> int:
         """Map a source slide index to its position in the built deck."""
@@ -97,11 +77,11 @@ class EditorState:
             self.undo.pop(0)
         self.redo.clear()
 
-    def commit(self, changed: int | None = None) -> None:
+    def commit(self) -> None:
         self.doc.save()
         self.last_written_mtime = self.path.stat().st_mtime
         self.last_known_mtime = self.last_written_mtime
-        self.rebuild(changed)
+        self.rebuild()
 
     def restore(self, text: str) -> None:
         self.doc = DeckDocument.from_text(text, self.path)
@@ -153,6 +133,12 @@ class Session:
         self.extra: list[dict] = []
         self.clipboard: list[str] = []
         self.cropping = False
+        # Text of the slide this tab believes it is on, so the tab can follow
+        # that slide when another tab or an agent inserts or deletes slides.
+        self.slide_text: str | None = None
+        self.drifted = ""          # message for the next poll, when the tab had to move
+        self.busy = False          # a drag, crop or in-place edit is in progress here
+        self.busy_at = 0.0
 
     def clamp(self, n_slides: int) -> None:
         self.index = max(0, min(self.index, n_slides - 1))

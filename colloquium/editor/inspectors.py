@@ -5,7 +5,7 @@ from __future__ import annotations
 from nicegui import ui
 
 from colloquium.editor import theme as theme_mod
-from colloquium.editor.util import ALIGNS, LAYOUTS, PADDINGS, SHAPES, SIZES, VALIGNS, hex_color, js, px_or_none
+from colloquium.editor.util import ALIGNS, LAYOUTS, PADDINGS, SHAPES, SIZES, VALIGNS, block_parts, hex_color, js, px_or_none
 
 
 class InspectorsMixin:
@@ -126,7 +126,7 @@ class InspectorsMixin:
 
     def _block_inspector(self, sel: dict):
         chunk = self.slide
-        c, b = divmod(int(sel.get("index", 0)), 100)
+        c, b = block_parts(sel.get("index", 0))
         blocks = chunk.cell_blocks(c) if c < len(chunk.cell_spans()) else []
         ui.label("Inline block").classes("ce-section")
         if b >= len(blocks) or (sel.get("count") is not None and int(sel["count"]) != len(blocks)):
